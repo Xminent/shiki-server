@@ -1,12 +1,17 @@
-use std::time::{Duration, Instant};
-
+use crate::server::Event as ServerMessage;
+use crate::{
+    events::{self, Opcode},
+    server,
+};
 use actix::prelude::*;
-use actix_web_actors::ws;
-
-use crate::server;
+use actix_web_actors::ws::{self, Message};
+use std::time::{Duration, Instant};
 
 /// How often heartbeat pings are sent
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+
+/// How long to wait before lack of client response causes a timeout
+const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long before lack of client response causes a timeout
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -23,7 +28,9 @@ pub struct GatewaySession {
     /// peer name
     pub name: Option<String>,
     /// Chat server
-    pub addr: Addr<server::ChatServer>,
+    pub addr: Addr<server::ShikiServer>,
+    /// Auth token
+    pub token: Option<String>,
 }
 
 impl GatewaySession {
@@ -50,6 +57,18 @@ impl GatewaySession {
             ctx.ping(b"");
         });
     }
+
+    fn check_authenticate(&self, ctx: &mut ws::WebsocketContext<Self>) {
+        ctx.run_later(AUTH_TIMEOUT, |act, ctx| {
+            if act.token.is_none() {
+                log::debug!(
+                    "Websocket Client authentication failed, disconnecting!"
+                );
+                act.addr.do_send(server::Disconnect { id: act.id });
+                ctx.stop();
+            }
+        });
+    }
 }
 
 impl Actor for GatewaySession {
@@ -58,6 +77,8 @@ impl Actor for GatewaySession {
     /// Method is called on actor start.
     /// We register ws session with ChatServer
     fn started(&mut self, ctx: &mut Self::Context) {
+        // start checking for authentication
+        // self.check_authenticate(ctx);
         // we'll start heartbeat process on session start.
         self.hb(ctx);
 
@@ -92,19 +113,39 @@ impl Actor for GatewaySession {
 }
 
 /// Handle messages from chat server, we simply send it to peer websocket
-impl Handler<server::Message> for GatewaySession {
+impl Handler<server::Event> for GatewaySession {
     type Result = ();
 
-    fn handle(&mut self, msg: server::Message, ctx: &mut Self::Context) {
-        ctx.text(msg.0);
+    fn handle(&mut self, msg: server::Event, ctx: &mut Self::Context) {
+        log::debug!("session {} received {:?}", self.id, msg);
+
+        match msg {
+            ServerMessage::Custom(msg) => ctx.text(msg),
+            ServerMessage::Ready(msg) => match serde_json::to_string(&msg) {
+                Ok(msg) => {
+                    ctx.text(msg);
+                }
+
+                _ => ctx.stop(),
+            },
+        }
+    }
+}
+
+impl Handler<events::Ready> for GatewaySession {
+    type Result = ();
+
+    fn handle(&mut self, msg: events::Ready, ctx: &mut Self::Context) {
+        log::debug!("User {} is ready", msg.name);
+        ctx.text(serde_json::to_string(&msg).unwrap());
     }
 }
 
 /// Actual websocket message handler
-impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for GatewaySession {
+impl StreamHandler<Result<Message, ws::ProtocolError>> for GatewaySession {
     fn handle(
         &mut self,
-        msg: Result<ws::Message, ws::ProtocolError>,
+        msg: Result<Message, ws::ProtocolError>,
         ctx: &mut Self::Context,
     ) {
         let msg = match msg {
@@ -115,90 +156,57 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for GatewaySession {
             Ok(msg) => msg,
         };
 
-        log::debug!("WEBSOCKET MESSAGE: {msg:?}");
-
         match msg {
-            ws::Message::Ping(msg) => {
+            Message::Ping(msg) => {
                 self.hb = Instant::now();
                 ctx.pong(&msg);
             }
-            ws::Message::Pong(_) => {
+            Message::Pong(_) => {
                 self.hb = Instant::now();
             }
-            ws::Message::Text(text) => {
-                let m = text.trim();
-                // we check for /sss type of messages
-                if m.starts_with('/') {
-                    let v: Vec<&str> = m.splitn(2, ' ').collect();
-                    match v[0] {
-                        "/list" => {
-                            // Send ListRooms message to chat server and wait for
-                            // response
-                            log::debug!("List rooms");
-                            self.addr
-                                .send(server::ListRooms)
-                                .into_actor(self)
-                                .then(|res, _, ctx| {
-                                    match res {
-                                        Ok(rooms) => {
-                                            for room in rooms {
-                                                ctx.text(room);
-                                            }
-                                        }
-                                        _ => log::warn!("Something is wrong"),
-                                    }
-                                    fut::ready(())
-                                })
-                                .wait(ctx)
-                            // .wait(ctx) pauses all events in context,
-                            // so actor wont receive any new messages until it get list
-                            // of rooms back
-                        }
-                        "/join" => {
-                            if v.len() == 2 {
-                                self.room = v[1].to_owned();
-                                self.addr.do_send(server::Join {
-                                    id: self.id,
-                                    name: self.room.clone(),
-                                });
+            Message::Text(text) => {
+                if let Ok(json) =
+                    serde_json::from_str::<serde_json::Value>(&text)
+                {
+                    log::debug!("JSON: {json:?}");
 
-                                ctx.text("joined");
-                            } else {
-                                ctx.text("!!! room name is required");
+                    if let Some(opcode) = Opcode::from_json(json.get("op")) {
+                        log::debug!("Opcode: {opcode:?}");
+
+                        match opcode {
+                            Opcode::Identify => {
+                                if let Some(token) =
+                                    json.get("token").and_then(|t| t.as_str())
+                                {
+                                    self.addr.do_send(server::Identify {
+                                        id: self.id,
+                                        token: token.to_string(),
+                                    });
+                                }
                             }
                         }
-                        "/name" => {
-                            if v.len() == 2 {
-                                self.name = Some(v[1].to_owned());
-                            } else {
-                                ctx.text("!!! name is required");
-                            }
-                        }
-                        _ => ctx.text(format!("!!! unknown command: {m:?}")),
                     }
-                } else {
-                    let msg = if let Some(ref name) = self.name {
-                        format!("{name}: {m}")
-                    } else {
-                        m.to_owned()
-                    };
-                    // send message to chat server
-                    self.addr.do_send(server::ClientMessage {
-                        id: self.id,
-                        msg,
-                        room: self.room.clone(),
-                    })
                 }
+
+                // send message to chat server
+                self.addr.do_send(server::ClientMessage {
+                    id: self.id,
+                    msg: text.to_string(),
+                    room: self.room.clone(),
+                })
             }
-            ws::Message::Binary(_) => log::warn!("Unexpected binary"),
-            ws::Message::Close(reason) => {
+            // Print the length of our binary message
+            Message::Binary(bin) => {
+                log::debug!("Binary: {}", bin.len());
+            }
+            Message::Close(reason) => {
                 ctx.close(reason);
                 ctx.stop();
             }
-            ws::Message::Continuation(_) => {
+            Message::Continuation(_) => {
                 ctx.stop();
             }
-            ws::Message::Nop => (),
+            Message::Nop => (),
         }
     }
 }
