@@ -12,9 +12,10 @@ async fn gateway(
 ) -> Result<HttpResponse, Error> {
     ws::start(
         session::GatewaySession {
-            id: 0,
+            session_id: 0,
             hb: Instant::now(),
-            room: "main".to_owned(),
+            room: 0,
+            id: 0,
             name: None,
             addr: srv.get_ref().clone(),
             token: None,
