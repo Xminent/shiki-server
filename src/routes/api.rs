@@ -29,7 +29,7 @@ async fn create_channel(
 	data: web::Json<String>, srv: web::Data<Addr<crate::server::ShikiServer>>,
 ) -> HttpResponse {
 	match srv
-		.send(crate::server::ChannelCreate {
+		.send(crate::server::CreateChannel {
 			id: 0,
 			name: data.into_inner(),
 			sessions: HashSet::new(),

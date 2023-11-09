@@ -1,5 +1,5 @@
 use crate::{
-	events::{self, HasOpcode, MessageCreate, Opcode, Ready},
+	events::{self, Event, Ready},
 	utils::{self},
 };
 use actix::prelude::*;
@@ -14,38 +14,6 @@ use std::{
 		Arc, Mutex,
 	},
 };
-
-/// Chat server sends this messages to session
-#[derive(Message, Debug, Clone)]
-#[rtype(result = "()")]
-pub enum Event {
-	Ready(Ready),
-	MessageCreate(MessageCreate),
-	Custom(String),
-}
-
-impl Event {
-	pub fn opcode(&self) -> Opcode {
-		match self {
-			Event::Ready(_) => Ready::opcode(),
-			Event::MessageCreate(_) => MessageCreate::opcode(),
-			Event::Custom(_) => Opcode::Custom,
-		}
-	}
-}
-
-impl Serialize for Event {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		match self {
-			Event::Ready(ready) => ready.serialize(serializer),
-			Event::MessageCreate(message) => message.serialize(serializer),
-			Event::Custom(msg) => serializer.serialize_str(msg),
-		}
-	}
-}
 
 /// Message for chat server communications
 
@@ -73,18 +41,18 @@ pub struct Identify {
 
 /// Create new channel
 #[derive(Serialize, Debug, Clone)]
-pub struct ChannelCreate {
+pub struct CreateChannel {
 	/// Channel ID
 	pub id: i64,
 	/// Channel name
 	pub name: String,
 	/// IDs of sessions in the channel
-	// #[serde(skip_serializing)]
+	#[serde(skip_serializing)]
 	pub sessions: HashSet<usize>,
 }
 
-impl actix::Message for ChannelCreate {
-	type Result = Option<ChannelCreate>;
+impl actix::Message for CreateChannel {
+	type Result = Option<CreateChannel>;
 }
 
 /// Create new message
@@ -108,7 +76,7 @@ impl actix::Message for CreateMessage {
 pub struct ListChannels;
 
 impl actix::Message for ListChannels {
-	type Result = Vec<ChannelCreate>;
+	type Result = Vec<CreateChannel>;
 }
 
 /// Join channel, if channel does not exists create new one.
@@ -120,7 +88,7 @@ pub struct Join {
 }
 
 impl actix::Message for Join {
-	type Result = Option<ChannelCreate>;
+	type Result = Option<CreateChannel>;
 }
 
 const DEFAULT_CHANNEL: i64 = 0;
@@ -135,7 +103,7 @@ pub struct ShikiServer {
 	/// The actual connected clients to the gateway.
 	sessions: HashMap<usize, Recipient<Event>>,
 	/// Chat channels. In this case they're individual channels where messages are propagated to users in the same channel. This could be a channel, guild, etc.
-	channels: HashMap<i64, ChannelCreate>,
+	channels: HashMap<i64, CreateChannel>,
 	/// Random generator for making unique IDs.
 	rng: ThreadRng,
 	/// Snowflake generator.
@@ -153,7 +121,7 @@ impl ShikiServer {
 
 		channels.insert(
 			DEFAULT_CHANNEL,
-			ChannelCreate {
+			CreateChannel {
 				id: DEFAULT_CHANNEL,
 				name: "main".to_owned(),
 				sessions: HashSet::new(),
@@ -195,11 +163,11 @@ impl ShikiServer {
 	}
 
 	/// Send message to literally everyone.
-	fn send_to_everyone(&self, message: &str, skip_id: usize) {
+	fn send_to_everyone(&self, message: events::Event, skip_id: usize) {
 		// message every session.
 		for (id, addr) in &self.sessions {
 			if *id != skip_id {
-				addr.do_send(Event::Custom(message.to_owned()));
+				addr.do_send(message.clone());
 			}
 		}
 	}
@@ -271,7 +239,7 @@ impl Handler<Identify> for ShikiServer {
 		};
 
 		// Check if the passed token is valid, if not send disconnect message.
-		utils::validate_token(self.client.clone(), msg.token.clone())
+		utils::validate_token(self.client.clone(), msg.token)
 			.into_actor(self)
 			.then(move |res, _, _| {
 				if let Some(user) = res {
@@ -295,41 +263,38 @@ impl Handler<Identify> for ShikiServer {
 	}
 }
 
-impl Handler<ChannelCreate> for ShikiServer {
-	type Result = MessageResult<ChannelCreate>;
+impl Handler<CreateChannel> for ShikiServer {
+	type Result = MessageResult<CreateChannel>;
 
 	fn handle(
-		&mut self, msg: ChannelCreate, _: &mut Context<Self>,
+		&mut self, msg: CreateChannel, _: &mut Context<Self>,
 	) -> Self::Result {
 		log::info!("Channel created");
 
 		let id = self.snowflake_gen.lock().unwrap().real_time_generate();
-		let exists = self.channels.insert(
-			id,
-			ChannelCreate {
-				id,
-				name: msg.name.clone(),
-				sessions: HashSet::new(),
-			},
-		);
 
-		let channel: Self::Result = MessageResult(if exists.is_some() {
-			None
-		} else {
-			Some(self.channels.get(&id).unwrap().clone())
-		});
-
-		if channel.0.is_some() {
-			let msg_str = serde_json::to_string(&events::ChannelCreate::new(
-				id, msg.name,
-			));
-
-			if let Ok(msg_str) = msg_str {
-				self.send_to_everyone(&msg_str, 0);
-			}
+		if self.channels.contains_key(&id) {
+			return MessageResult(None);
 		}
 
-		channel
+		let mut channel = CreateChannel {
+			id,
+			name: msg.name.clone(),
+			sessions: HashSet::new(),
+		};
+
+		for session_id in self.sessions.keys() {
+			channel.sessions.insert(*session_id);
+		}
+
+		self.channels.insert(id, channel.clone());
+
+		self.send_to_everyone(
+			Event::ChannelCreate(events::ChannelCreate::new(id, msg.name)),
+			0,
+		);
+
+		MessageResult(Some(channel))
 	}
 }
 

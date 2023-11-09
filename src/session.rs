@@ -1,4 +1,3 @@
-use crate::server::Event as ServerMessage;
 use crate::{
 	events::{self, Opcode},
 	server,
@@ -142,21 +141,21 @@ impl Actor for GatewaySession {
 }
 
 /// Handle messages from chat server, we simply send it to peer websocket
-impl Handler<server::Event> for GatewaySession {
+impl Handler<events::Event> for GatewaySession {
 	type Result = ();
 
-	fn handle(&mut self, msg: server::Event, ctx: &mut Self::Context) {
+	fn handle(&mut self, msg: events::Event, ctx: &mut Self::Context) {
 		log::debug!("session {} received {:?}", self.session_id, msg);
 
 		match msg {
-			ServerMessage::Custom(msg) => ctx.text(msg),
+			events::Event::Custom(msg) => ctx.text(msg),
 
 			ref other => {
 				let opcode = other.opcode();
 				// Create a JSON object with an  op being opcode and a key "d" containing the payload.
 				let json = serde_json::json!({
 					"op": opcode,
-					"d": serde_json::to_value(&other).unwrap(),
+					"d": serde_json::to_value(other).unwrap(),
 				});
 
 				ctx.text(serde_json::to_string(&json).unwrap());

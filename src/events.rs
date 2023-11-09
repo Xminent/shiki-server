@@ -74,7 +74,7 @@ impl MessageCreate {
 		Self { id, content, author_id, channel_id }
 	}
 }
-#[derive(Message, Serialize, Deserialize, Debug)]
+#[derive(Message, Serialize, Deserialize, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct ChannelCreate {
 	/// The id of the channel
@@ -104,5 +104,40 @@ impl HasOpcode for MessageCreate {
 impl HasOpcode for ChannelCreate {
 	fn opcode() -> Opcode {
 		Opcode::ChannelCreate
+	}
+}
+
+/// Chat server sends this messages to session
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub enum Event {
+	ChannelCreate(ChannelCreate),
+	MessageCreate(MessageCreate),
+	Ready(Ready),
+	Custom(String),
+}
+
+impl Event {
+	pub fn opcode(&self) -> Opcode {
+		match self {
+			Event::ChannelCreate(_) => ChannelCreate::opcode(),
+			Event::MessageCreate(_) => MessageCreate::opcode(),
+			Event::Ready(_) => Ready::opcode(),
+			Event::Custom(_) => Opcode::Custom,
+		}
+	}
+}
+
+impl Serialize for Event {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		match self {
+			Event::ChannelCreate(channel) => channel.serialize(serializer),
+			Event::MessageCreate(message) => message.serialize(serializer),
+			Event::Ready(ready) => ready.serialize(serializer),
+			Event::Custom(msg) => serializer.serialize_str(msg),
+		}
 	}
 }
