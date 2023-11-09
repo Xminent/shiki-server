@@ -1,11 +1,11 @@
 use crate::{
-	events::{self, Ready},
+	events::{self, HasOpcode, MessageCreate, Opcode, Ready},
 	utils::{self},
 };
 use actix::prelude::*;
 use mongodb::Client;
 use rand::{self, rngs::ThreadRng, Rng};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use snowflake::SnowflakeIdGenerator;
 use std::{
 	collections::{HashMap, HashSet},
@@ -16,11 +16,35 @@ use std::{
 };
 
 /// Chat server sends this messages to session
-#[derive(Message, Debug)]
+#[derive(Message, Debug, Clone)]
 #[rtype(result = "()")]
 pub enum Event {
 	Ready(Ready),
+	MessageCreate(MessageCreate),
 	Custom(String),
+}
+
+impl Event {
+	pub fn opcode(&self) -> Opcode {
+		match self {
+			Event::Ready(_) => Ready::opcode(),
+			Event::MessageCreate(_) => MessageCreate::opcode(),
+			Event::Custom(_) => Opcode::Custom,
+		}
+	}
+}
+
+impl Serialize for Event {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		match self {
+			Event::Ready(ready) => ready.serialize(serializer),
+			Event::MessageCreate(message) => message.serialize(serializer),
+			Event::Custom(msg) => serializer.serialize_str(msg),
+		}
+	}
 }
 
 /// Message for chat server communications
@@ -47,14 +71,14 @@ pub struct Identify {
 	pub token: String,
 }
 
-/// Create new room
+/// Create new channel
 #[derive(Serialize, Debug, Clone)]
 pub struct ChannelCreate {
-	/// Room ID
+	/// Channel ID
 	pub id: i64,
-	/// Room name
+	/// Channel name
 	pub name: String,
-	/// IDs of sessions in the room
+	/// IDs of sessions in the channel
 	// #[serde(skip_serializing)]
 	pub sessions: HashSet<usize>,
 }
@@ -63,19 +87,36 @@ impl actix::Message for ChannelCreate {
 	type Result = Option<ChannelCreate>;
 }
 
-/// List of available rooms
+/// Create new message
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CreateMessage {
+	/// Message ID
+	#[serde(skip_deserializing)]
+	pub id: i64,
+	/// Channel ID
+	#[serde(skip_deserializing)]
+	pub channel_id: i64,
+	/// Message content
+	pub content: String,
+}
+
+impl actix::Message for CreateMessage {
+	type Result = Option<CreateMessage>;
+}
+
+/// List of available channels
 pub struct ListChannels;
 
 impl actix::Message for ListChannels {
 	type Result = Vec<ChannelCreate>;
 }
 
-/// Join room, if room does not exists create new one.
+/// Join channel, if channel does not exists create new one.
 pub struct Join {
 	/// Client ID
 	pub client_id: usize,
-	/// Room ID
-	pub room_id: i64,
+	/// Channel ID
+	pub channel_id: i64,
 }
 
 impl actix::Message for Join {
@@ -84,7 +125,7 @@ impl actix::Message for Join {
 
 const DEFAULT_CHANNEL: i64 = 0;
 
-/// `ShikiServer` manages chat rooms and responsible for coordinating chat session.
+/// `ShikiServer` manages chat channels and responsible for coordinating chat session.
 ///
 /// Implementation is very naïve.
 #[derive(Debug)]
@@ -93,7 +134,7 @@ pub struct ShikiServer {
 	client: Client,
 	/// The actual connected clients to the gateway.
 	sessions: HashMap<usize, Recipient<Event>>,
-	/// Chat rooms. In this case they're individual rooms where messages are propagated to users in the same room. This could be a channel, guild, etc.
+	/// Chat channels. In this case they're individual channels where messages are propagated to users in the same channel. This could be a channel, guild, etc.
 	channels: HashMap<i64, ChannelCreate>,
 	/// Random generator for making unique IDs.
 	rng: ThreadRng,
@@ -133,10 +174,10 @@ impl ShikiServer {
 impl ShikiServer {
 	/// Send message to all users in the channel
 	fn send_channel_message(
-		&self, channel: i64, message: &str, skip_id: usize,
+		&self, channel: i64, message: Event, skip_id: usize,
 	) {
 		if let Some(sessions) =
-			self.channels.get(&channel).map(|room| &room.sessions)
+			self.channels.get(&channel).map(|channel| &channel.sessions)
 		{
 			log::debug!(
 				"Sending message to {} sessions in channel {channel}",
@@ -146,7 +187,7 @@ impl ShikiServer {
 			for id in sessions {
 				if *id != skip_id {
 					if let Some(addr) = self.sessions.get(id) {
-						addr.do_send(Event::Custom(message.to_owned()));
+						addr.do_send(message.clone());
 					}
 				}
 			}
@@ -171,9 +212,6 @@ impl Actor for ShikiServer {
 	type Context = Context<Self>;
 }
 
-/// Handler for Connect message.
-///
-/// Register new session and assign unique id to this session
 impl Handler<Connect> for ShikiServer {
 	type Result = usize;
 
@@ -196,30 +234,32 @@ impl Handler<Connect> for ShikiServer {
 	}
 }
 
-/// Handler for Disconnect message.
 impl Handler<Disconnect> for ShikiServer {
 	type Result = ();
 
 	fn handle(&mut self, msg: Disconnect, _: &mut Context<Self>) {
 		log::info!("{} disconnected", msg.id);
 
-		let mut rooms: Vec<i64> = Vec::new();
+		let mut channels: Vec<i64> = Vec::new();
 
 		if self.sessions.remove(&msg.id).is_some() {
-			for (_, room) in &mut self.channels {
-				if room.sessions.remove(&msg.id) {
-					rooms.push(room.id);
+			for (_, channel) in &mut self.channels {
+				if channel.sessions.remove(&msg.id) {
+					channels.push(channel.id);
 				}
 			}
 		}
 
-		for room in rooms {
-			self.send_channel_message(room, &format!("{} left", msg.id), 0);
+		for channel in channels {
+			self.send_channel_message(
+				channel,
+				Event::Custom(format!("{} left", msg.id)),
+				0,
+			);
 		}
 	}
 }
 
-/// Handler for Identify message.
 impl Handler<Identify> for ShikiServer {
 	type Result = ();
 
@@ -255,33 +295,13 @@ impl Handler<Identify> for ShikiServer {
 	}
 }
 
-/// Handler for Message message.
-impl Handler<events::MessageCreate> for ShikiServer {
-	type Result = ();
-
-	fn handle(
-		&mut self, mut msg: events::MessageCreate, _: &mut Context<Self>,
-	) {
-		msg.id = self.snowflake_gen.lock().unwrap().real_time_generate();
-
-		let msg_str = if let Ok(msg) = serde_json::to_string(&msg) {
-			msg
-		} else {
-			return;
-		};
-
-		self.send_channel_message(msg.channel_id, &msg_str, 0);
-	}
-}
-
-/// Handler for CreateRoom message.
 impl Handler<ChannelCreate> for ShikiServer {
 	type Result = MessageResult<ChannelCreate>;
 
 	fn handle(
 		&mut self, msg: ChannelCreate, _: &mut Context<Self>,
 	) -> Self::Result {
-		log::info!("Room created");
+		log::info!("Channel created");
 
 		let id = self.snowflake_gen.lock().unwrap().real_time_generate();
 		let exists = self.channels.insert(
@@ -313,7 +333,41 @@ impl Handler<ChannelCreate> for ShikiServer {
 	}
 }
 
-/// Handler for `ListRooms` message.
+impl Handler<CreateMessage> for ShikiServer {
+	type Result = MessageResult<CreateMessage>;
+
+	fn handle(
+		&mut self, msg: CreateMessage, _: &mut Context<Self>,
+	) -> Self::Result {
+		log::info!("Message created");
+
+		let id = self.snowflake_gen.lock().unwrap().real_time_generate();
+
+		let channel = self.channels.get(&msg.channel_id);
+
+		if channel.is_none() {
+			return MessageResult(None);
+		}
+
+		let channel = channel.unwrap();
+
+		let event = events::MessageCreate::new(
+			id,
+			msg.content.clone(),
+			None,
+			msg.channel_id,
+		);
+
+		self.send_channel_message(channel.id, Event::MessageCreate(event), 0);
+
+		MessageResult(Some(CreateMessage {
+			id,
+			channel_id: msg.channel_id,
+			content: msg.content,
+		}))
+	}
+}
+
 impl Handler<ListChannels> for ShikiServer {
 	type Result = MessageResult<ListChannels>;
 
@@ -324,17 +378,15 @@ impl Handler<ListChannels> for ShikiServer {
 	}
 }
 
-/// Join room, send disconnect message to old room
-/// send join message to new room
 impl Handler<Join> for ShikiServer {
 	type Result = MessageResult<Join>;
 
 	fn handle(&mut self, msg: Join, _: &mut Context<Self>) -> Self::Result {
-		let Join { client_id, room_id } = msg;
+		let Join { client_id, channel_id } = msg;
 
-		match self.channels.get_mut(&room_id) {
-			Some(room) => {
-				room.sessions.insert(client_id);
+		match self.channels.get_mut(&channel_id) {
+			Some(channel) => {
+				channel.sessions.insert(client_id);
 			}
 
 			None => {
@@ -342,8 +394,12 @@ impl Handler<Join> for ShikiServer {
 			}
 		}
 
-		self.send_channel_message(room_id, "Someone connected", client_id);
+		self.send_channel_message(
+			channel_id,
+			Event::Custom("Someone connected".to_owned()),
+			client_id,
+		);
 
-		MessageResult(Some(self.channels.get_mut(&room_id).unwrap().clone()))
+		MessageResult(Some(self.channels.get_mut(&channel_id).unwrap().clone()))
 	}
 }

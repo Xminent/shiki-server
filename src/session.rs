@@ -24,8 +24,8 @@ pub struct GatewaySession {
 	/// Client must send ping at least once per 10 seconds (CLIENT_TIMEOUT),
 	/// otherwise we drop connection.
 	pub hb: Instant,
-	/// joined room
-	pub room: i64,
+	/// joined channel
+	pub channel: i64,
 	/// peer id
 	pub id: i64,
 	/// peer name
@@ -95,20 +95,6 @@ impl GatewaySession {
 				});
 			}
 
-			Opcode::MessageCreate => {
-				let content = data
-					.get("content")
-					.and_then(|c| c.as_str())
-					.ok_or(anyhow::anyhow!("no content"))?;
-
-				self.addr.do_send(events::MessageCreate::new(
-					0,
-					content.to_string(),
-					Some(self.id),
-					self.room,
-				));
-			}
-
 			_ => (),
 		}
 
@@ -164,13 +150,17 @@ impl Handler<server::Event> for GatewaySession {
 
 		match msg {
 			ServerMessage::Custom(msg) => ctx.text(msg),
-			ServerMessage::Ready(msg) => match serde_json::to_string(&msg) {
-				Ok(msg) => {
-					ctx.text(msg);
-				}
 
-				_ => ctx.stop(),
-			},
+			ref other => {
+				let opcode = other.opcode();
+				// Create a JSON object with an  op being opcode and a key "d" containing the payload.
+				let json = serde_json::json!({
+					"op": opcode,
+					"d": serde_json::to_value(&other).unwrap(),
+				});
+
+				ctx.text(serde_json::to_string(&json).unwrap());
+			}
 		}
 	}
 }

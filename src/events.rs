@@ -1,6 +1,12 @@
 use actix::Message;
 use serde::{Deserialize, Serialize};
 
+// This file contains all the events that can be sent from the server to the client.
+
+pub trait HasOpcode {
+	fn opcode() -> Opcode;
+}
+
 // Opcode enum used for sending and receiving many of the Gateway events similar to the Discord Gateway.
 #[derive(Deserialize, Debug, PartialEq, Eq, Copy, Clone)]
 #[repr(u8)]
@@ -9,6 +15,7 @@ pub enum Opcode {
 	Ready,
 	MessageCreate,
 	ChannelCreate,
+	Custom,
 }
 
 impl Opcode {
@@ -34,31 +41,29 @@ impl Serialize for Opcode {
 }
 
 /// Identify Payload which is sent from the server to all clients notifying them someone is online.
-#[derive(Message, Serialize, Deserialize, Debug)]
+#[derive(Message, Serialize, Deserialize, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct Ready {
-	op: Opcode,
 	pub id: i64,
 	pub name: String,
 }
 
 impl Ready {
 	pub fn new(id: i64, name: String) -> Self {
-		Self { op: Opcode::Ready, id, name }
+		Self { id, name }
 	}
 }
 
-#[derive(Message, Serialize, Deserialize, Debug)]
+#[derive(Message, Serialize, Deserialize, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct MessageCreate {
-	op: Opcode,
 	/// The id of the message
 	pub id: i64,
 	/// The content of the message
 	pub content: String,
 	/// The author of the message
 	pub author_id: Option<i64>,
-	/// The ID of the channel/room.
+	/// The ID of the channel.
 	pub channel_id: i64,
 }
 
@@ -66,14 +71,12 @@ impl MessageCreate {
 	pub fn new(
 		id: i64, content: String, author_id: Option<i64>, channel_id: i64,
 	) -> Self {
-		Self { op: Opcode::MessageCreate, id, content, author_id, channel_id }
+		Self { id, content, author_id, channel_id }
 	}
 }
-
 #[derive(Message, Serialize, Deserialize, Debug)]
 #[rtype(result = "()")]
 pub struct ChannelCreate {
-	op: Opcode,
 	/// The id of the channel
 	pub id: i64,
 	/// The name of the channel
@@ -82,6 +85,24 @@ pub struct ChannelCreate {
 
 impl ChannelCreate {
 	pub fn new(id: i64, name: String) -> Self {
-		Self { op: Opcode::ChannelCreate, id, name }
+		Self { id, name }
+	}
+}
+
+impl HasOpcode for Ready {
+	fn opcode() -> Opcode {
+		Opcode::Ready
+	}
+}
+
+impl HasOpcode for MessageCreate {
+	fn opcode() -> Opcode {
+		Opcode::MessageCreate
+	}
+}
+
+impl HasOpcode for ChannelCreate {
+	fn opcode() -> Opcode {
+		Opcode::ChannelCreate
 	}
 }
