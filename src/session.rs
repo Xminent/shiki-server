@@ -1,6 +1,6 @@
 use crate::{
 	events::{self, Opcode},
-	server,
+	server::{self},
 };
 use actix::prelude::*;
 use actix_web_actors::ws::{self, Message};
@@ -72,7 +72,9 @@ impl GatewaySession {
 		});
 	}
 
-	fn handle_json(&self, text: &str) -> Result<()> {
+	fn handle_json(
+		&self, text: &str, _ctx: &mut ws::WebsocketContext<Self>,
+	) -> Result<()> {
 		let json = serde_json::from_str::<serde_json::Value>(text)?;
 		let opcode = Opcode::from_json(json.get("op"))
 			.ok_or(anyhow::anyhow!("no opcode"))?;
@@ -86,12 +88,11 @@ impl GatewaySession {
 				let token = data
 					.get("token")
 					.and_then(|t| t.as_str())
-					.ok_or(anyhow::anyhow!("no token"))?;
+					.ok_or(anyhow::anyhow!("no token"))?
+					.to_string();
 
-				self.addr.do_send(server::Identify {
-					id: self.session_id,
-					token: token.to_string(),
-				});
+				self.addr
+					.do_send(server::Identify { id: self.session_id, token });
 			}
 
 			_ => (),
@@ -108,7 +109,7 @@ impl Actor for GatewaySession {
 	/// We register ws session with ChatServer
 	fn started(&mut self, ctx: &mut Self::Context) {
 		// start checking for authentication
-		// self.check_authenticate(ctx);
+		self.check_authenticate(ctx);
 		// we'll start heartbeat process on session start.
 		self.heartbeat(ctx);
 
@@ -150,9 +151,16 @@ impl Handler<events::Event> for GatewaySession {
 		match msg {
 			events::Event::Custom(msg) => ctx.text(msg),
 
+			events::Event::SetToken(token) => {
+				log::debug!(
+					"{} has authenticated, setting token",
+					self.session_id
+				);
+				self.token = Some(token);
+			}
+
 			ref other => {
 				let opcode = other.opcode();
-				// Create a JSON object with an  op being opcode and a key "d" containing the payload.
 				let json = serde_json::json!({
 					"op": opcode,
 					"d": serde_json::to_value(other).unwrap(),
@@ -186,7 +194,7 @@ impl StreamHandler<Result<Message, ws::ProtocolError>> for GatewaySession {
 			Message::Pong(_) => {
 				self.hb = Instant::now();
 			}
-			Message::Text(text) => match self.handle_json(&text) {
+			Message::Text(text) => match self.handle_json(&text, ctx) {
 				Ok(_) => (),
 				Err(e) => {
 					ctx.text(e.to_string());

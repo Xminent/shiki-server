@@ -38,7 +38,8 @@ pub struct Identify {
 }
 
 /// Create new channel
-#[derive(Serialize, Debug, Clone)]
+#[derive(Message, Serialize, Debug, Clone)]
+#[rtype(result = "Option<CreateChannel>")]
 pub struct CreateChannel {
 	/// Channel ID
 	pub id: i64,
@@ -47,10 +48,6 @@ pub struct CreateChannel {
 	/// IDs of sessions in the channel
 	#[serde(skip_serializing)]
 	pub sessions: HashSet<usize>,
-}
-
-impl actix::Message for CreateChannel {
-	type Result = Option<CreateChannel>;
 }
 
 /// Create new message
@@ -257,10 +254,12 @@ impl Handler<Identify> for ShikiServer {
 		};
 
 		// Check if the passed token is valid, if not send disconnect message.
-		utils::validate_token(self.client.clone(), msg.token)
+		utils::validate_token(self.client.clone(), msg.token.clone())
 			.into_actor(self)
 			.then(move |res, _, _| {
 				if let Some(user) = res {
+					session.do_send(Event::SetToken(msg.token));
+
 					log::info!(
 						"User {} authenticated, sending Ready payload...",
 						user.username
@@ -277,7 +276,7 @@ impl Handler<Identify> for ShikiServer {
 
 				fut::ready(())
 			})
-			.wait(ctx);
+			.wait(ctx)
 	}
 }
 

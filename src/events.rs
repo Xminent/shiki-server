@@ -114,6 +114,7 @@ pub enum Event {
 	ChannelCreate(ChannelCreate),
 	MessageCreate(MessageCreate),
 	Ready(Ready),
+	SetToken(String),
 	Custom(String),
 }
 
@@ -124,6 +125,7 @@ impl Event {
 			Event::MessageCreate(_) => MessageCreate::opcode(),
 			Event::Ready(_) => Ready::opcode(),
 			Event::Custom(_) => Opcode::Custom,
+			Event::SetToken(_) => Opcode::Custom,
 		}
 	}
 }
@@ -138,6 +140,7 @@ impl Serialize for Event {
 			Event::MessageCreate(message) => message.serialize(serializer),
 			Event::Ready(ready) => ready.serialize(serializer),
 			Event::Custom(msg) => serializer.serialize_str(msg),
+			Event::SetToken(token) => serializer.serialize_str(token),
 		}
 	}
 }
