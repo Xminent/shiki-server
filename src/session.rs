@@ -164,16 +164,6 @@ impl Handler<events::Event> for GatewaySession {
 	}
 }
 
-impl Handler<events::Ready> for GatewaySession {
-	type Result = ();
-
-	fn handle(&mut self, msg: events::Ready, ctx: &mut Self::Context) {
-		log::debug!("User {} is ready", msg.name);
-		ctx.text(serde_json::to_string(&msg).unwrap());
-		self.id = msg.id;
-	}
-}
-
 /// Actual websocket message handler
 impl StreamHandler<Result<Message, ws::ProtocolError>> for GatewaySession {
 	fn handle(

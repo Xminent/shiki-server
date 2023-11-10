@@ -15,8 +15,6 @@ use std::{
 	},
 };
 
-/// Message for chat server communications
-
 /// New chat session is created
 #[derive(Message)]
 #[rtype(usize)]
@@ -189,7 +187,11 @@ impl Handler<Connect> for ShikiServer {
 		// register session with random id
 		let id = self.rng.gen::<usize>();
 		self.sessions.insert(id, msg.addr.clone());
-		self.channels.get_mut(&DEFAULT_CHANNEL).unwrap().sessions.insert(id);
+
+		// Insert the user into every single channel's sessions.
+		for (_, channel) in &mut self.channels {
+			channel.sessions.insert(id);
+		}
 
 		// Send an Identify event to the client so they may authenticate themselves.
 		msg.addr.do_send(Event::Custom(id.to_string()));
@@ -207,6 +209,22 @@ impl Handler<Disconnect> for ShikiServer {
 
 	fn handle(&mut self, msg: Disconnect, _: &mut Context<Self>) {
 		log::info!("{} disconnected", msg.id);
+
+		let count = self.visitor_count.fetch_update(
+			Ordering::SeqCst,
+			Ordering::SeqCst,
+			|current| {
+				if current > 0 {
+					Some(current - 1)
+				} else {
+					None
+				}
+			},
+		);
+
+		if let Ok(updated_count) = count {
+			log::info!("{} visitors online", updated_count);
+		}
 
 		let mut channels: Vec<i64> = Vec::new();
 
@@ -277,15 +295,11 @@ impl Handler<CreateChannel> for ShikiServer {
 			return MessageResult(None);
 		}
 
-		let mut channel = CreateChannel {
+		let channel = CreateChannel {
 			id,
 			name: msg.name.clone(),
-			sessions: HashSet::new(),
+			sessions: self.sessions.keys().cloned().collect(),
 		};
-
-		for session_id in self.sessions.keys() {
-			channel.sessions.insert(*session_id);
-		}
 
 		self.channels.insert(id, channel.clone());
 
