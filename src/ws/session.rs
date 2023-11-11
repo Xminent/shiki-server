@@ -1,6 +1,6 @@
-use crate::{
-	events::{self, Opcode},
-	server::{self},
+use crate::ws::{
+	events::{Event, Opcode},
+	server,
 };
 use actix::prelude::*;
 use actix_web_actors::ws::{self, Message};
@@ -67,7 +67,10 @@ impl GatewaySession {
 					"Websocket Client authentication failed, disconnecting!"
 				);
 				act.addr.do_send(server::Disconnect { id: act.session_id });
-				ctx.stop();
+				ctx.close(Some(ws::CloseReason {
+					code: ws::CloseCode::Other(4000),
+					description: None,
+				}));
 			}
 		});
 	}
@@ -142,16 +145,27 @@ impl Actor for GatewaySession {
 }
 
 /// Handle messages from chat server, we simply send it to peer websocket
-impl Handler<events::Event> for GatewaySession {
+impl Handler<Event> for GatewaySession {
 	type Result = ();
 
-	fn handle(&mut self, msg: events::Event, ctx: &mut Self::Context) {
-		log::debug!("session {} received {:?}", self.session_id, msg);
+	fn handle(&mut self, msg: Event, ctx: &mut Self::Context) {
+		log::debug!("session {} received event {:?}", self.session_id, msg);
 
 		match msg {
-			events::Event::Custom(msg) => ctx.text(msg),
+			Event::Custom(msg) => ctx.text(msg),
 
-			events::Event::SetToken(token) => {
+			Event::BadToken => {
+				ctx.close(Some(ws::CloseReason {
+					code: ws::CloseCode::Other(4000),
+					description: None,
+				}));
+			}
+
+			Event::Hello => {
+				log::debug!("{} connected", self.session_id);
+			}
+
+			Event::SetToken(token) => {
 				log::debug!(
 					"{} has authenticated, setting token",
 					self.session_id

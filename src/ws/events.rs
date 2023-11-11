@@ -1,5 +1,7 @@
+use crate::ws::server::User;
 use actix::Message;
-use serde::{Deserialize, Serialize};
+use derives::HasOpcode;
+use serde::{Deserialize, Serialize, Serializer};
 
 // This file contains all the events that can be sent from the server to the client.
 
@@ -34,14 +36,15 @@ impl Opcode {
 impl Serialize for Opcode {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
-		S: serde::Serializer,
+		S: Serializer,
 	{
 		serializer.serialize_u8(*self as u8)
 	}
 }
 
 /// Identify Payload which is sent from the server to all clients notifying them someone is online.
-#[derive(Message, Serialize, Deserialize, Debug, Clone)]
+#[derive(Message, Serialize, Deserialize, Debug, Clone, HasOpcode)]
+#[opcode(value = "Opcode::Ready")]
 #[rtype(result = "()")]
 pub struct Ready {
 	pub id: i64,
@@ -54,27 +57,30 @@ impl Ready {
 	}
 }
 
-#[derive(Message, Serialize, Deserialize, Debug, Clone)]
+#[derive(Message, Serialize, Deserialize, Debug, Clone, HasOpcode)]
+#[opcode(value = "Opcode::MessageCreate")]
 #[rtype(result = "()")]
 pub struct MessageCreate {
 	/// The id of the message
 	pub id: i64,
 	/// The content of the message
 	pub content: String,
-	/// The author of the message
-	pub author_id: Option<i64>,
 	/// The ID of the channel.
 	pub channel_id: i64,
+	/// The author of the message.
+	pub author: User,
 }
 
 impl MessageCreate {
 	pub fn new(
-		id: i64, content: String, author_id: Option<i64>, channel_id: i64,
+		id: i64, content: String, channel_id: i64, author: User,
 	) -> Self {
-		Self { id, content, author_id, channel_id }
+		Self { id, content, channel_id, author }
 	}
 }
-#[derive(Message, Serialize, Deserialize, Debug, Clone)]
+
+#[derive(Message, Serialize, Deserialize, Debug, Clone, HasOpcode)]
+#[opcode(value = "Opcode::ChannelCreate")]
 #[rtype(result = "()")]
 pub struct ChannelCreate {
 	/// The id of the channel
@@ -89,24 +95,6 @@ impl ChannelCreate {
 	}
 }
 
-impl HasOpcode for Ready {
-	fn opcode() -> Opcode {
-		Opcode::Ready
-	}
-}
-
-impl HasOpcode for MessageCreate {
-	fn opcode() -> Opcode {
-		Opcode::MessageCreate
-	}
-}
-
-impl HasOpcode for ChannelCreate {
-	fn opcode() -> Opcode {
-		Opcode::ChannelCreate
-	}
-}
-
 /// Chat server sends this messages to session
 #[derive(Message, Debug, Clone)]
 #[rtype(result = "()")]
@@ -114,6 +102,9 @@ pub enum Event {
 	ChannelCreate(ChannelCreate),
 	MessageCreate(MessageCreate),
 	Ready(Ready),
+
+	BadToken,
+	Hello,
 	SetToken(String),
 	Custom(String),
 }
@@ -124,7 +115,10 @@ impl Event {
 			Event::ChannelCreate(_) => ChannelCreate::opcode(),
 			Event::MessageCreate(_) => MessageCreate::opcode(),
 			Event::Ready(_) => Ready::opcode(),
+
 			Event::Custom(_) => Opcode::Custom,
+			Event::BadToken => Opcode::Custom,
+			Event::Hello => Opcode::Custom,
 			Event::SetToken(_) => Opcode::Custom,
 		}
 	}
@@ -133,13 +127,16 @@ impl Event {
 impl Serialize for Event {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
-		S: serde::Serializer,
+		S: Serializer,
 	{
 		match self {
 			Event::ChannelCreate(channel) => channel.serialize(serializer),
 			Event::MessageCreate(message) => message.serialize(serializer),
 			Event::Ready(ready) => ready.serialize(serializer),
+
 			Event::Custom(msg) => serializer.serialize_str(msg),
+			Event::BadToken => serializer.serialize_str(""),
+			Event::Hello => serializer.serialize_str(""),
 			Event::SetToken(token) => serializer.serialize_str(token),
 		}
 	}

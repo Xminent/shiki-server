@@ -1,3 +1,4 @@
+use crate::ws::server::ShikiServer;
 use actix::*;
 use actix_cors::Cors;
 use actix_files::Files;
@@ -18,13 +19,11 @@ use std::{
 
 mod auth;
 mod errors;
-mod events;
 mod models;
 mod routes;
-mod server;
-mod session;
 mod utils;
 mod validator;
+mod ws;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -51,12 +50,9 @@ async fn main() -> std::io::Result<()> {
 		1,
 		UNIX_EPOCH + Duration::from_millis(1672531200),
 	)));
-	let server = server::ShikiServer::new(
-		db.clone(),
-		snowflake_gen.clone(),
-		app_state.clone(),
-	)
-	.start();
+	let server =
+		ShikiServer::new(db.clone(), snowflake_gen.clone(), app_state.clone())
+			.start();
 
 	log::info!("starting HTTP server at http://localhost:8080");
 
@@ -92,7 +88,9 @@ async fn main() -> std::io::Result<()> {
             .wrap(Logger::default())
             // .wrap(auth)
             .wrap(cors)
-            .configure(routes::routes)
+			.configure(|cfg| {
+				routes::routes(&db, cfg);
+			})
 	})
 	.workers(2)
 	.bind(("127.0.0.1", 8080))?

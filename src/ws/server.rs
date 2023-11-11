@@ -1,6 +1,7 @@
+use super::events::{self, Event};
 use crate::{
-	events::{self, Event, Ready},
 	utils::{self},
+	ws::events::Ready,
 };
 use actix::prelude::*;
 use mongodb::Client;
@@ -50,8 +51,18 @@ pub struct CreateChannel {
 	pub sessions: HashSet<usize>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub struct User {
+	pub id: i64,
+	pub username: String,
+	pub joined: usize,
+	/// Avatar URL
+	pub avatar: Option<String>,
+}
+
 /// Create new message
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Message, Serialize, Deserialize, Debug, Clone)]
+#[rtype(result = "Option<CreateMessage>")]
 pub struct CreateMessage {
 	/// Message ID
 	#[serde(skip_deserializing)]
@@ -61,29 +72,24 @@ pub struct CreateMessage {
 	pub channel_id: i64,
 	/// Message content
 	pub content: String,
-}
-
-impl actix::Message for CreateMessage {
-	type Result = Option<CreateMessage>;
+	/// User who sent the message
+	#[serde(skip_deserializing)]
+	pub author: User,
 }
 
 /// List of available channels
+#[derive(Message)]
+#[rtype(result = "Vec<CreateChannel>")]
 pub struct ListChannels;
 
-impl actix::Message for ListChannels {
-	type Result = Vec<CreateChannel>;
-}
-
 /// Join channel, if channel does not exists create new one.
+#[derive(Message)]
+#[rtype(result = "Option<CreateChannel>")]
 pub struct Join {
 	/// Client ID
 	pub client_id: usize,
 	/// Channel ID
 	pub channel_id: i64,
-}
-
-impl actix::Message for Join {
-	type Result = Option<CreateChannel>;
 }
 
 const DEFAULT_CHANNEL: i64 = 0;
@@ -158,7 +164,7 @@ impl ShikiServer {
 	}
 
 	/// Send message to literally everyone.
-	fn send_to_everyone(&self, message: events::Event, skip_id: usize) {
+	fn send_to_everyone(&self, message: Event, skip_id: usize) {
 		// message every session.
 		for (id, addr) in &self.sessions {
 			if *id != skip_id {
@@ -186,12 +192,12 @@ impl Handler<Connect> for ShikiServer {
 		self.sessions.insert(id, msg.addr.clone());
 
 		// Insert the user into every single channel's sessions.
-		for (_, channel) in &mut self.channels {
+		for channel in self.channels.values_mut() {
 			channel.sessions.insert(id);
 		}
 
 		// Send an Identify event to the client so they may authenticate themselves.
-		msg.addr.do_send(Event::Custom(id.to_string()));
+		msg.addr.do_send(Event::Hello);
 
 		let count = self.visitor_count.fetch_add(1, Ordering::SeqCst);
 
@@ -226,7 +232,7 @@ impl Handler<Disconnect> for ShikiServer {
 		let mut channels: Vec<i64> = Vec::new();
 
 		if self.sessions.remove(&msg.id).is_some() {
-			for (_, channel) in &mut self.channels {
+			for channel in self.channels.values_mut() {
 				if channel.sessions.remove(&msg.id) {
 					channels.push(channel.id);
 				}
@@ -270,8 +276,8 @@ impl Handler<Identify> for ShikiServer {
 						user.username,
 					)));
 				} else {
-					log::info!("Invalid token");
-					session.do_send(Event::Custom("Invalid token".to_owned()));
+					log::warn!("Invalid token");
+					session.do_send(Event::BadToken);
 				}
 
 				fut::ready(())
@@ -332,8 +338,8 @@ impl Handler<CreateMessage> for ShikiServer {
 		let event = events::MessageCreate::new(
 			id,
 			msg.content.clone(),
-			None,
 			msg.channel_id,
+			msg.author.clone(),
 		);
 
 		self.send_channel_message(channel.id, Event::MessageCreate(event), 0);
@@ -342,6 +348,7 @@ impl Handler<CreateMessage> for ShikiServer {
 			id,
 			channel_id: msg.channel_id,
 			content: msg.content,
+			author: msg.author,
 		}))
 	}
 }

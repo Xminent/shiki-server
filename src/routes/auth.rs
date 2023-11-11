@@ -1,13 +1,13 @@
 use crate::{
-    auth,
-    models::{User, UserInsert, UserLogin, UserResponse},
-    routes::{DB_NAME, USER_COLL_NAME},
+	auth,
+	models::{User, UserInsert, UserLogin, UserResponse},
+	routes::{DB_NAME, USER_COLL_NAME},
 };
 use actix_web::{post, web, HttpResponse};
 use mongodb::{
-    bson::doc,
-    error::{ErrorKind, WriteFailure},
-    Client,
+	bson::doc,
+	error::{ErrorKind, WriteFailure},
+	Client,
 };
 use snowflake::SnowflakeIdGenerator;
 use std::sync::Mutex;
@@ -23,78 +23,79 @@ use validator::Validate;
 
 #[post("/register")]
 async fn register(
-    client: web::Data<Client>,
-    data: web::Json<UserInsert>,
-    snowflake_gen: web::Data<Mutex<SnowflakeIdGenerator>>,
+	client: web::Data<Client>, data: web::Json<UserInsert>,
+	snowflake_gen: web::Data<Mutex<SnowflakeIdGenerator>>,
 ) -> HttpResponse {
-    if let Err(err) = data.validate() {
-        return HttpResponse::BadRequest().json(err);
-    }
+	if let Err(err) = data.validate() {
+		return HttpResponse::BadRequest().json(err);
+	}
 
-    let user = User::new(
-        snowflake_gen.lock().unwrap().real_time_generate(),
-        &data.email,
-        &data.username,
-        &auth::hash(data.password.as_bytes()).await,
-    );
-    let res = client
-        .database(DB_NAME)
-        .collection(USER_COLL_NAME)
-        .insert_one(user.clone(), None)
-        .await;
+	let id = snowflake_gen.lock().unwrap().real_time_generate();
 
-    match res {
-        Ok(_) => HttpResponse::Ok().json(UserResponse::from(user)),
-        Err(err) => {
-            log::error!("add_user: {}", err);
+	let user = User::new(
+		id,
+		&data.email,
+		&data.username,
+		&auth::hash(data.password.as_bytes()).await,
+	);
 
-            if let ErrorKind::Write(WriteFailure::WriteError(write_err)) =
-                *err.kind
-            {
-                if write_err.code == 11000 {
-                    return HttpResponse::BadRequest()
-                        .body("User already exists");
-                }
-            }
+	let res = client
+		.database(DB_NAME)
+		.collection(USER_COLL_NAME)
+		.insert_one(user.clone(), None)
+		.await;
 
-            HttpResponse::InternalServerError().body("Something went wrong")
-        }
-    }
+	match res {
+		Ok(_) => HttpResponse::Ok().json(UserResponse::from(user)),
+		Err(err) => {
+			log::error!("add_user: {}", err);
+
+			if let ErrorKind::Write(WriteFailure::WriteError(write_err)) =
+				*err.kind
+			{
+				if write_err.code == 11000 {
+					return HttpResponse::BadRequest()
+						.body("User already exists");
+				}
+			}
+
+			HttpResponse::InternalServerError().body("Something went wrong")
+		}
+	}
 }
 
 #[post("/login")]
 async fn login(
-    client: web::Data<Client>,
-    data: web::Json<UserLogin>,
+	client: web::Data<Client>, data: web::Json<UserLogin>,
 ) -> HttpResponse {
-    if let Err(err) = data.validate() {
-        return HttpResponse::BadRequest().json(err);
-    }
+	if let Err(err) = data.validate() {
+		return HttpResponse::BadRequest().json(err);
+	}
 
-    // Verify if the user exists.
-    let res = client
-        .database(DB_NAME)
-        .collection::<User>(USER_COLL_NAME)
-        .find_one(doc! {"email": &data.email}, None)
-        .await;
+	// Verify if the user exists.
+	let res = client
+		.database(DB_NAME)
+		.collection::<User>(USER_COLL_NAME)
+		.find_one(doc! {"email": &data.email}, None)
+		.await;
 
-    match res {
-        Ok(Some(user)) => {
-            match auth::verify_password(
-                &user.password,
-                data.password.as_bytes(),
-            )
-            .await
-            {
-                Ok(_) => HttpResponse::Ok().json(UserResponse::from(user)),
-                Err(_) => HttpResponse::BadRequest().body("Invalid password"),
-            }
-        }
+	match res {
+		Ok(Some(user)) => {
+			match auth::verify_password(
+				&user.password,
+				data.password.as_bytes(),
+			)
+			.await
+			{
+				Ok(_) => HttpResponse::Ok().json(UserResponse::from(user)),
+				Err(_) => HttpResponse::BadRequest().body("Invalid password"),
+			}
+		}
 
-        _ => HttpResponse::InternalServerError().body("Something went wrong"),
-    }
+		_ => HttpResponse::InternalServerError().body("Something went wrong"),
+	}
 }
 
 pub fn routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(web::scope("/auth").service(register).service(login));
+	cfg.service(web::scope("/auth").service(register).service(login));
 }

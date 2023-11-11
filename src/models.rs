@@ -1,8 +1,10 @@
+use actix_web::{FromRequest, HttpMessage};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::future::ready;
 use validator::Validate;
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct User {
 	pub id: i64,
 	pub email: String,
@@ -23,6 +25,24 @@ impl User {
 			password: password.to_string(),
 			token: uuid::Uuid::new_v4().to_string(),
 			created_at: Utc::now().timestamp() as usize,
+		}
+	}
+}
+
+impl FromRequest for User {
+	type Error = actix_web::Error;
+	type Future = std::future::Ready<Result<Self, Self::Error>>;
+
+	fn from_request(
+		req: &actix_web::HttpRequest, _: &mut actix_web::dev::Payload,
+	) -> Self::Future {
+		let extensions = req.extensions();
+		let user = extensions.get::<User>();
+
+		if let Some(user) = user {
+			ready(Ok(user.clone()))
+		} else {
+			ready(Err(actix_web::error::ErrorUnauthorized("Unauthorized")))
 		}
 	}
 }

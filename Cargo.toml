@@ -7,6 +7,11 @@ edition = "2021"
 name = "websocket-chat-server"
 path = "src/main.rs"
 
+[lib]
+name = "derives"
+path = "lib/lib.rs"
+proc-macro = true
+
 [dependencies]
 actix = "0.13.1"
 actix-cors = "0.6.4"
@@ -25,8 +30,12 @@ mongodb = "2.7.0"
 rand = "0.8.5"
 serde = "1.0.188"
 serde_json = "1.0.107"
-tokio = "1.33.0"
+tokio = { version = "1.33.0", features = ["full"] }
 uuid = "1.4.1"
 validator = { version = "0.16.1", features = ["derive"] }
 rs-snowflake = "0.6.0"
 anyhow = "1.0.75"
+futures-util = "0.3.29"
+syn = { version = "2.0.39", features = ["full"] }
+quote = "1.0"
+proc-macro2 = "1.0"

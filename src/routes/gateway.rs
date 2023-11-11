@@ -1,4 +1,4 @@
-use crate::{server, session};
+use crate::ws::{server::ShikiServer, session::GatewaySession};
 use actix::Addr;
 use actix_web::{get, web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
@@ -6,11 +6,10 @@ use std::time::Instant;
 
 #[get("/gateway")]
 async fn gateway(
-	req: HttpRequest, stream: web::Payload,
-	srv: web::Data<Addr<server::ShikiServer>>,
+	req: HttpRequest, stream: web::Payload, srv: web::Data<Addr<ShikiServer>>,
 ) -> Result<HttpResponse, Error> {
 	ws::start(
-		session::GatewaySession {
+		GatewaySession {
 			session_id: 0,
 			hb: Instant::now(),
 			channel: 0,
