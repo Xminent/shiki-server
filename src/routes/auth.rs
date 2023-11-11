@@ -1,6 +1,6 @@
 use crate::{
 	auth,
-	models::{User, UserInsert, UserLogin, UserResponse},
+	models::User,
 	routes::{DB_NAME, USER_COLL_NAME},
 };
 use actix_web::{post, web, HttpResponse};
@@ -9,6 +9,7 @@ use mongodb::{
 	error::{ErrorKind, WriteFailure},
 	Client,
 };
+use serde::{Deserialize, Serialize};
 use snowflake::SnowflakeIdGenerator;
 use std::sync::Mutex;
 use validator::Validate;
@@ -20,6 +21,27 @@ use validator::Validate;
 //     .build();
 
 // collection.create_index(email_index_model, None).await;
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct UserInsert {
+	#[validate(email)]
+	pub email: String,
+	pub username: String,
+	#[validate(length(min = 8))]
+	pub password: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct UserResponse {
+	pub email: String,
+	pub username: String,
+}
+
+impl From<User> for UserResponse {
+	fn from(user_db: User) -> Self {
+		UserResponse { email: user_db.email, username: user_db.username }
+	}
+}
 
 #[post("/register")]
 async fn register(
@@ -37,6 +59,7 @@ async fn register(
 		&data.email,
 		&data.username,
 		&auth::hash(data.password.as_bytes()).await,
+		None,
 	);
 
 	let res = client
@@ -62,6 +85,14 @@ async fn register(
 			HttpResponse::InternalServerError().body("Something went wrong")
 		}
 	}
+}
+
+#[derive(Debug, Deserialize, Validate)]
+struct UserLogin {
+	#[validate(email)]
+	pub email: String,
+	#[validate(length(min = 8))]
+	pub password: String,
 }
 
 #[post("/login")]
