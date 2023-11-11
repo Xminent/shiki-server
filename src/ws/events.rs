@@ -1,3 +1,4 @@
+use super::server::Channel;
 use crate::ws::server::User;
 use actix::Message;
 use derives::HasOpcode;
@@ -42,19 +43,13 @@ impl Serialize for Opcode {
 	}
 }
 
-/// Identify Payload which is sent from the server to all clients notifying them someone is online.
+/// Identify Payload which is sent from the server to the client. This will contain a lot of data, like the guilds they are in, channels, etc. To be used as the entry point/hello world of the application.
 #[derive(Message, Serialize, Deserialize, Debug, Clone, HasOpcode)]
 #[opcode(value = "Opcode::Ready")]
 #[rtype(result = "()")]
 pub struct Ready {
-	pub id: i64,
-	pub name: String,
-}
-
-impl Ready {
-	pub fn new(id: i64, name: String) -> Self {
-		Self { id, name }
-	}
+	pub channels: Vec<Channel>,
+	pub user: User,
 }
 
 #[derive(Message, Serialize, Deserialize, Debug, Clone, HasOpcode)]

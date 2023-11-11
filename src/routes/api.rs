@@ -1,18 +1,20 @@
 use super::middleware::Auth;
 use crate::{
-	models::User,
-	routes::{DB_NAME, USER_COLL_NAME},
-	ws::server::{
-		self, CreateChannel, CreateMessage, Join, ListChannels, ShikiServer,
-	},
+	models::{Channel, User},
+	routes::{CHANNEL_COLL_NAME, DB_NAME, USER_COLL_NAME},
+	ws::server::{self, CreateMessage, Join, ListChannels, ShikiServer},
 };
 use actix::Addr;
 use actix_web::{get, patch, post, web, HttpResponse, Responder};
 use mongodb::{bson::doc, Client};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use snowflake::SnowflakeIdGenerator;
 use std::{
 	collections::HashSet,
-	sync::atomic::{AtomicUsize, Ordering},
+	sync::{
+		atomic::{AtomicUsize, Ordering},
+		Mutex,
+	},
 };
 use validator::Validate;
 
@@ -34,15 +36,43 @@ async fn get_channels_list(
 	}
 }
 
+#[derive(Deserialize, Validate, Serialize)]
+struct CreateChannel {
+	#[validate(length(min = 1))]
+	pub name: String,
+}
+
 /// Creates a new channel.
 #[post("/channels")]
 async fn create_channel(
-	data: web::Json<String>, srv: web::Data<Addr<ShikiServer>>,
+	client: web::Data<Client>, data: web::Json<CreateChannel>,
+	snowflake_gen: web::Data<Mutex<SnowflakeIdGenerator>>,
+	srv: web::Data<Addr<ShikiServer>>, user: User,
 ) -> HttpResponse {
+	if let Err(err) = data.validate() {
+		return HttpResponse::BadRequest().json(err);
+	}
+
+	let data = data.into_inner();
+	let id = snowflake_gen.lock().unwrap().real_time_generate();
+	let channel = Channel::new(id, &data.name, None, user.id);
+
+	let res = client
+		.database(DB_NAME)
+		.collection::<Channel>(CHANNEL_COLL_NAME)
+		.insert_one(channel, None)
+		.await;
+
+	if res.is_err() {
+		return HttpResponse::InternalServerError()
+			.body("Something went wrong");
+	}
+
 	match srv
-		.send(CreateChannel {
-			id: 0,
-			name: data.into_inner(),
+		.send(server::Channel {
+			id,
+			guild_id: None,
+			name: data.name,
 			sessions: HashSet::new(),
 		})
 		.await

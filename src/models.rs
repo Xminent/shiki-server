@@ -4,6 +4,34 @@ use serde::{Deserialize, Serialize};
 use std::future::ready;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub struct Channel {
+	/// The id of the channel
+	pub id: i64,
+	/// The name of the channel.
+	pub name: String,
+	/// The description of the channel.
+	pub description: Option<String>,
+	/// Unix timestamp for when channel was created.
+	pub created_at: usize,
+	/// The id of the user who created the channel.
+	pub owner_id: i64,
+}
+
+impl Channel {
+	pub fn new(
+		id: i64, name: &str, description: Option<String>, owner_id: i64,
+	) -> Self {
+		Channel {
+			id,
+			name: name.to_string(),
+			description,
+			created_at: Utc::now().timestamp() as usize,
+			owner_id,
+		}
+	}
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct User {
 	pub id: i64,
 	pub email: String,

@@ -1,10 +1,12 @@
 use super::events::{self, Event};
 use crate::{
+	routes::{CHANNEL_COLL_NAME, DB_NAME},
 	utils::{self},
 	ws::events::Ready,
 };
 use actix::prelude::*;
-use mongodb::Client;
+use futures::stream::StreamExt;
+use mongodb::{bson::doc, Client};
 use rand::{self, rngs::ThreadRng, Rng};
 use serde::{Deserialize, Serialize};
 use snowflake::SnowflakeIdGenerator;
@@ -39,16 +41,28 @@ pub struct Identify {
 }
 
 /// Create new channel
-#[derive(Message, Serialize, Debug, Clone)]
-#[rtype(result = "Option<CreateChannel>")]
-pub struct CreateChannel {
+#[derive(Message, Serialize, Debug, Clone, Deserialize)]
+#[rtype(result = "Option<Channel>")]
+pub struct Channel {
 	/// Channel ID
 	pub id: i64,
+	/// Guild ID
+	pub guild_id: Option<i64>,
 	/// Channel name
 	pub name: String,
 	/// IDs of sessions in the channel
-	#[serde(skip_serializing)]
+	#[serde(skip_serializing, skip_deserializing)]
 	pub sessions: HashSet<usize>,
+}
+
+/// Create new Guild
+#[derive(Message, Serialize, Debug, Clone, Deserialize)]
+#[rtype(result = "Option<Guild>")]
+pub struct Guild {
+	/// ID of the guild
+	pub id: i64,
+	/// Guild name
+	pub name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
@@ -79,20 +93,18 @@ pub struct CreateMessage {
 
 /// List of available channels
 #[derive(Message)]
-#[rtype(result = "Vec<CreateChannel>")]
+#[rtype(result = "Vec<Channel>")]
 pub struct ListChannels;
 
 /// Join channel, if channel does not exists create new one.
 #[derive(Message)]
-#[rtype(result = "Option<CreateChannel>")]
+#[rtype(result = "Option<Channel>")]
 pub struct Join {
 	/// Client ID
 	pub client_id: usize,
 	/// Channel ID
 	pub channel_id: i64,
 }
-
-const DEFAULT_CHANNEL: i64 = 0;
 
 /// `ShikiServer` manages chat channels and responsible for coordinating chat session.
 ///
@@ -104,7 +116,7 @@ pub struct ShikiServer {
 	/// The actual connected clients to the gateway.
 	sessions: HashMap<usize, Recipient<Event>>,
 	/// Chat channels. In this case they're individual channels where messages are propagated to users in the same channel. This could be a channel, guild, etc.
-	channels: HashMap<i64, CreateChannel>,
+	channels: HashMap<i64, Channel>,
 	/// Random generator for making unique IDs.
 	rng: ThreadRng,
 	/// Snowflake generator.
@@ -117,22 +129,11 @@ impl ShikiServer {
 	pub fn new(
 		client: Client, snowflake_gen: Arc<Mutex<SnowflakeIdGenerator>>,
 		visitor_count: Arc<AtomicUsize>,
-	) -> ShikiServer {
-		let mut channels = HashMap::new();
-
-		channels.insert(
-			DEFAULT_CHANNEL,
-			CreateChannel {
-				id: DEFAULT_CHANNEL,
-				name: "main".to_owned(),
-				sessions: HashSet::new(),
-			},
-		);
-
-		ShikiServer {
+	) -> Self {
+		Self {
 			client,
 			sessions: HashMap::new(),
-			channels,
+			channels: HashMap::new(),
 			rng: rand::thread_rng(),
 			snowflake_gen,
 			visitor_count,
@@ -179,6 +180,47 @@ impl Actor for ShikiServer {
 	/// We are going to use simple Context, we just need ability to communicate
 	/// with other actors.
 	type Context = Context<Self>;
+
+	fn started(&mut self, ctx: &mut Self::Context) {
+		let client_clone = self.client.clone();
+
+		async move {
+			let mut channels = HashMap::<i64, Channel>::new();
+			let cursor = client_clone
+				.database(DB_NAME)
+				.collection::<Channel>(CHANNEL_COLL_NAME)
+				.find(None, None)
+				.await;
+
+			if let Err(e) = cursor {
+				log::error!("Failed to load channels: {}", e);
+				return None;
+			}
+
+			let mut cursor = cursor.unwrap();
+
+			while let Some(channel) = cursor.next().await {
+				if let Ok(channel) = channel {
+					log::debug!("Loaded channel: {:?}", channel);
+					channels.insert(channel.id, channel.clone());
+				}
+			}
+
+			Some(channels)
+		}
+		.into_actor(self)
+		.then(move |res, act, _| {
+			if let Some(channels) = res {
+				act.channels = channels;
+			}
+
+			fut::ready(())
+		})
+		.wait(ctx);
+
+		log::info!("Chat server started");
+		log::info!("Loaded {} channels", self.channels.len());
+	}
 }
 
 impl Handler<Connect> for ShikiServer {
@@ -262,23 +304,47 @@ impl Handler<Identify> for ShikiServer {
 		// Check if the passed token is valid, if not send disconnect message.
 		utils::validate_token(self.client.clone(), msg.token.clone())
 			.into_actor(self)
-			.then(move |res, _, _| {
-				if let Some(user) = res {
-					session.do_send(Event::SetToken(msg.token));
-
-					log::info!(
-						"User {} authenticated, sending Ready payload...",
-						user.username
-					);
-
-					session.do_send(Event::Ready(Ready::new(
-						user.id,
-						user.username,
-					)));
-				} else {
+			.then(move |res, act, _ctx| {
+				if res.is_none() {
 					log::warn!("Invalid token");
 					session.do_send(Event::BadToken);
 				}
+
+				let user = res.unwrap();
+
+				// Attempt to get all the channels which have the user's ID.
+				// act.client
+				// 	.database(DB_NAME)
+				// 	.collection::<Channel>(CHANNEL_COLL_NAME)
+				// 	.find(doc! {"members": user.id}, None)
+				// 	.into_actor(act)
+				// 	.then(move |res, act, _| {
+				// 		if let Ok(cursor) = res {
+				// 			let channels = cursor
+				// 				.map(|doc| doc.unwrap())
+				// 				.collect::<Vec<_>>();
+				// 		}
+
+				// 		fut::ready(())
+				// 	})
+				// 	.wait(ctx);
+
+				session.do_send(Event::SetToken(msg.token));
+
+				log::info!(
+					"User {} authenticated, sending Ready payload...",
+					user.username
+				);
+
+				session.do_send(Event::Ready(Ready {
+					channels: act.channels.values().cloned().collect(),
+					user: User {
+						username: user.username,
+						id: user.id,
+						avatar: user.avatar,
+						joined: user.created_at,
+					},
+				}));
 
 				fut::ready(())
 			})
@@ -286,34 +352,27 @@ impl Handler<Identify> for ShikiServer {
 	}
 }
 
-impl Handler<CreateChannel> for ShikiServer {
-	type Result = MessageResult<CreateChannel>;
+impl Handler<Channel> for ShikiServer {
+	type Result = MessageResult<Channel>;
 
-	fn handle(
-		&mut self, msg: CreateChannel, _: &mut Context<Self>,
-	) -> Self::Result {
+	fn handle(&mut self, msg: Channel, _: &mut Context<Self>) -> Self::Result {
 		log::info!("Channel created");
 
-		let id = self.snowflake_gen.lock().unwrap().real_time_generate();
-
-		if self.channels.contains_key(&id) {
+		if self.channels.contains_key(&msg.id) {
 			return MessageResult(None);
 		}
 
-		let channel = CreateChannel {
-			id,
-			name: msg.name.clone(),
-			sessions: self.sessions.keys().cloned().collect(),
-		};
-
-		self.channels.insert(id, channel.clone());
+		self.channels.insert(msg.id, msg.clone());
 
 		self.send_to_everyone(
-			Event::ChannelCreate(events::ChannelCreate::new(id, msg.name)),
+			Event::ChannelCreate(events::ChannelCreate::new(
+				msg.id,
+				msg.name.clone(),
+			)),
 			0,
 		);
 
-		MessageResult(Some(channel))
+		MessageResult(Some(msg))
 	}
 }
 
