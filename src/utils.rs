@@ -1,3 +1,4 @@
+use futures::TryStreamExt;
 use mongodb::{bson::doc, Client};
 
 use crate::{
@@ -19,4 +20,16 @@ pub async fn validate_token(client: Client, token: String) -> Option<User> {
 		Ok(Some(user)) => Some(user),
 		_ => None,
 	}
+}
+
+pub async fn get_all_users(client: Client) -> Vec<User> {
+	client
+		.database(DB_NAME)
+		.collection::<User>(USER_COLL_NAME)
+		.find(None, None)
+		.await
+		.unwrap()
+		.try_collect()
+		.await
+		.unwrap()
 }

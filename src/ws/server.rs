@@ -301,54 +301,53 @@ impl Handler<Identify> for ShikiServer {
 			return;
 		};
 
-		// Check if the passed token is valid, if not send disconnect message.
-		utils::validate_token(self.client.clone(), msg.token.clone())
-			.into_actor(self)
-			.then(move |res, act, _ctx| {
-				if res.is_none() {
-					log::warn!("Invalid token");
-					session.do_send(Event::BadToken);
-				}
+		let channels = self.channels.clone();
+		let client_clone = self.client.clone();
 
-				let user = res.unwrap();
+		async move {
+			let res =
+				utils::validate_token(client_clone.clone(), msg.token.clone())
+					.await;
 
-				// Attempt to get all the channels which have the user's ID.
-				// act.client
-				// 	.database(DB_NAME)
-				// 	.collection::<Channel>(CHANNEL_COLL_NAME)
-				// 	.find(doc! {"members": user.id}, None)
-				// 	.into_actor(act)
-				// 	.then(move |res, act, _| {
-				// 		if let Ok(cursor) = res {
-				// 			let channels = cursor
-				// 				.map(|doc| doc.unwrap())
-				// 				.collect::<Vec<_>>();
-				// 		}
+			if res.is_none() {
+				log::warn!("Invalid token");
+				return session.do_send(Event::BadToken);
+			}
 
-				// 		fut::ready(())
-				// 	})
-				// 	.wait(ctx);
+			let user = res.unwrap();
 
-				session.do_send(Event::SetToken(msg.token));
+			session.do_send(Event::SetToken(msg.token));
 
-				log::info!(
-					"User {} authenticated, sending Ready payload...",
-					user.username
-				);
+			log::info!(
+				"User {} authenticated, sending Ready payload...",
+				user.username
+			);
 
-				session.do_send(Event::Ready(Ready {
-					channels: act.channels.values().cloned().collect(),
-					user: User {
-						username: user.username,
-						id: user.id,
-						avatar: user.avatar,
-						joined: user.created_at,
-					},
-				}));
+			let users = utils::get_all_users(client_clone)
+				.await
+				.into_iter()
+				.map(|u| User {
+					username: u.username,
+					id: u.id,
+					avatar: u.avatar,
+					joined: u.created_at,
+				})
+				.collect();
 
-				fut::ready(())
-			})
-			.wait(ctx)
+			session.do_send(Event::Ready(Ready {
+				channels: channels.values().cloned().collect(),
+				user: User {
+					username: user.username,
+					id: user.id,
+					avatar: user.avatar,
+					joined: user.created_at,
+				},
+				users,
+			}));
+		}
+		.into_actor(self)
+		.then(|_, _, _| fut::ready(()))
+		.wait(ctx);
 	}
 }
 

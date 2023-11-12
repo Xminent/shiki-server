@@ -48,8 +48,12 @@ impl Serialize for Opcode {
 #[opcode(value = "Opcode::Ready")]
 #[rtype(result = "()")]
 pub struct Ready {
+	/// List of available channels.
 	pub channels: Vec<Channel>,
+	/// The user who connected
 	pub user: User,
+	/// List of all the users that are in the guild. Including the user who connected.
+	pub users: Vec<User>,
 }
 
 #[derive(Message, Serialize, Deserialize, Debug, Clone, HasOpcode)]
