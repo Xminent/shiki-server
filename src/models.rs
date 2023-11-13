@@ -32,6 +32,34 @@ impl Channel {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub struct Message {
+	/// The id of the message
+	pub id: i64,
+	/// The id of the channel the message was sent in
+	pub channel_id: i64,
+	/// The id of the user who sent the message
+	pub author_id: i64,
+	/// The content of the message
+	pub content: String,
+	/// Unix timestamp for when the message was created
+	pub created_at: usize,
+}
+
+impl Message {
+	pub fn new(
+		id: i64, channel_id: i64, author_id: i64, content: &str,
+	) -> Self {
+		Message {
+			id,
+			channel_id,
+			author_id,
+			content: content.to_string(),
+			created_at: Utc::now().timestamp() as usize,
+		}
+	}
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct User {
 	pub id: i64,
 	pub email: String,

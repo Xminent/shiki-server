@@ -1,5 +1,6 @@
 use super::events::{self, Event};
 use crate::{
+	models,
 	routes::{CHANNEL_COLL_NAME, DB_NAME},
 	utils::{self},
 	ws::events::Ready,
@@ -72,6 +73,17 @@ pub struct User {
 	pub joined: usize,
 	/// Avatar URL
 	pub avatar: Option<String>,
+}
+
+impl From<models::User> for User {
+	fn from(user: models::User) -> Self {
+		Self {
+			id: user.id,
+			username: user.username,
+			joined: user.created_at,
+			avatar: user.avatar,
+		}
+	}
 }
 
 /// Create new message
