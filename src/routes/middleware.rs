@@ -1,6 +1,7 @@
-use crate::{models::User, utils::validate_token};
+use crate::{utils::validate_token};
 use actix_web::{
 	dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+	error::ErrorInternalServerError,
 	HttpMessage,
 };
 use actix_web::{error::ErrorUnauthorized, Error};
@@ -100,14 +101,17 @@ where
 		Box::pin(async move {
 			let user = validate_token(client_clone, token).await;
 
-			if user.is_none() {
-				return Err(ErrorUnauthorized("Invalid token"));
+			match user {
+				Ok(Some(user)) => {
+					req.extensions_mut().insert(user);
+
+					let res = service_clone.call(req).await?;
+
+					Ok(res)
+				}
+				Ok(None) => Err(ErrorUnauthorized("Invalid token")),
+				Err(_) => Err(ErrorInternalServerError("Something went wrong")),
 			}
-
-			req.extensions_mut().insert::<User>(user.unwrap());
-
-			let res = service_clone.call(req).await?;
-			Ok(res)
 		})
 	}
 }

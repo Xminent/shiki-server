@@ -6,7 +6,7 @@ use crate::{
 	ws::events::Ready,
 };
 use actix::prelude::*;
-use futures::stream::StreamExt;
+use futures_util::TryStreamExt;
 use mongodb::{bson::doc, Client};
 use rand::{self, rngs::ThreadRng, Rng};
 use serde::{Deserialize, Serialize};
@@ -197,7 +197,6 @@ impl Actor for ShikiServer {
 		let client_clone = self.client.clone();
 
 		async move {
-			let mut channels = HashMap::<i64, Channel>::new();
 			let cursor = client_clone
 				.database(DB_NAME)
 				.collection::<Channel>(CHANNEL_COLL_NAME)
@@ -206,32 +205,37 @@ impl Actor for ShikiServer {
 
 			if let Err(e) = cursor {
 				log::error!("Failed to load channels: {}", e);
-				return None;
+				return Err(e);
 			}
 
-			let mut cursor = cursor.unwrap();
+			let cursor = cursor.unwrap();
 
-			while let Some(channel) = cursor.next().await {
-				if let Ok(channel) = channel {
-					log::debug!("Loaded channel: {:?}", channel);
-					channels.insert(channel.id, channel.clone());
+			let channels: Result<HashMap<i64, Channel>, _> =
+				cursor.try_collect::<Vec<Channel>>().await.map(|channels| {
+					channels
+						.into_iter()
+						.map(|channel| (channel.id, channel))
+						.collect()
+				});
+
+			channels
+		}
+		.into_actor(self)
+		.then(move |res, act, ctx| {
+			match res {
+				Ok(channels) => {
+					act.channels = channels;
+				}
+				Err(_) => {
+					log::error!("Failed to load channels, closing server");
+					ctx.stop();
 				}
 			}
 
-			Some(channels)
-		}
-		.into_actor(self)
-		.then(move |res, act, _| {
-			if let Some(channels) = res {
-				act.channels = channels;
-			}
-
+			log::info!("Loaded {} channels", act.channels.len());
 			fut::ready(())
 		})
 		.wait(ctx);
-
-		log::info!("Chat server started");
-		log::info!("Loaded {} channels", self.channels.len());
 	}
 }
 
@@ -321,12 +325,20 @@ impl Handler<Identify> for ShikiServer {
 				utils::validate_token(client_clone.clone(), msg.token.clone())
 					.await;
 
-			if res.is_none() {
-				log::warn!("Invalid token");
-				return session.do_send(Event::BadToken);
-			}
-
-			let user = res.unwrap();
+			let user = match res {
+				Ok(Some(user)) => user,
+				Ok(None) => {
+					log::warn!("Invalid token");
+					return session.do_send(Event::BadToken);
+				}
+				Err(e) => {
+					log::error!("Failed to validate token: {}", e);
+					log::debug!(
+						"Disconnecting session for failed token validation"
+					);
+					return session.do_send(Event::BadToken);
+				}
+			};
 
 			session.do_send(Event::SetToken(msg.token));
 

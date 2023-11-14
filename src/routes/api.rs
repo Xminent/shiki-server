@@ -85,6 +85,7 @@ async fn create_channel(
 }
 
 /// Joins a channel
+// NOTE: This is should be an internal feature, caused by the future addition of channel viewing permissions. Editing said permissions should allow a user to effectively "join" a channel.
 #[post("/channels/{channel_id}/join")]
 async fn join_channel(
 	channel_id: web::Path<i64>, srv: web::Data<Addr<ShikiServer>>,
@@ -211,7 +212,7 @@ async fn get_messages(
 		.find(
 			doc! {
 				"id": {
-					"$in": user_ids.iter().map(|id| *id).collect::<Vec<i64>>()
+					"$in": user_ids.iter().copied().collect::<Vec<i64>>()
 				}
 			},
 			None,
@@ -225,8 +226,6 @@ async fn get_messages(
 				.body("Something went wrong");
 		}
 	};
-
-	log::debug!("Users: {:?}", users);
 
 	let users: HashMap<i64, server::User> = match users {
 		Ok(users) => {
@@ -283,10 +282,15 @@ async fn create_message(
 			.body("Something went wrong");
 	}
 
+	// TODO: Refactor this so the response is not dependent on the gateway's response. Messages should still return 200s even if the gateway were to be down.
 	match srv.send(data).await {
 		Ok(Some(msg)) => HttpResponse::Ok().json(msg),
 		Ok(None) => HttpResponse::BadRequest().body("Channel does not exist!"),
-		Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
+		Err(err) => {
+			log::error!("Failed to send message: {:?}", err);
+
+			HttpResponse::InternalServerError().body("Something went wrong")
+		}
 	}
 }
 
