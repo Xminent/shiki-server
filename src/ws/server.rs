@@ -10,12 +10,11 @@ use futures_util::TryStreamExt;
 use mongodb::{bson::doc, Client};
 use rand::{self, rngs::ThreadRng, Rng};
 use serde::{Deserialize, Serialize};
-use snowflake::SnowflakeIdGenerator;
 use std::{
 	collections::{HashMap, HashSet},
 	sync::{
 		atomic::{AtomicUsize, Ordering},
-		Arc, Mutex,
+		Arc,
 	},
 };
 
@@ -131,23 +130,17 @@ pub struct ShikiServer {
 	channels: HashMap<i64, Channel>,
 	/// Random generator for making unique IDs.
 	rng: ThreadRng,
-	/// Snowflake generator.
-	snowflake_gen: Arc<Mutex<SnowflakeIdGenerator>>,
 	/// Number of connected clients
 	visitor_count: Arc<AtomicUsize>,
 }
 
 impl ShikiServer {
-	pub fn new(
-		client: Client, snowflake_gen: Arc<Mutex<SnowflakeIdGenerator>>,
-		visitor_count: Arc<AtomicUsize>,
-	) -> Self {
+	pub fn new(client: Client, visitor_count: Arc<AtomicUsize>) -> Self {
 		Self {
 			client,
 			sessions: HashMap::new(),
 			channels: HashMap::new(),
 			rng: rand::thread_rng(),
-			snowflake_gen,
 			visitor_count,
 		}
 	}
@@ -405,33 +398,26 @@ impl Handler<CreateMessage> for ShikiServer {
 	fn handle(
 		&mut self, msg: CreateMessage, _: &mut Context<Self>,
 	) -> Self::Result {
-		log::info!("Message created");
+		log::info!("Create message request: {:?}", msg);
 
-		let id = self.snowflake_gen.lock().unwrap().real_time_generate();
-
-		let channel = self.channels.get(&msg.channel_id);
-
-		if channel.is_none() {
+		if !self.channels.contains_key(&msg.channel_id) {
 			return MessageResult(None);
 		}
 
-		let channel = channel.unwrap();
-
 		let event = events::MessageCreate::new(
-			id,
+			msg.id,
 			msg.content.clone(),
 			msg.channel_id,
 			msg.author.clone(),
 		);
 
-		self.send_channel_message(channel.id, Event::MessageCreate(event), 0);
+		self.send_channel_message(
+			msg.channel_id,
+			Event::MessageCreate(event),
+			0,
+		);
 
-		MessageResult(Some(CreateMessage {
-			id,
-			channel_id: msg.channel_id,
-			content: msg.content,
-			author: msg.author,
-		}))
+		MessageResult(Some(msg))
 	}
 }
 
@@ -467,6 +453,8 @@ impl Handler<Join> for ShikiServer {
 			client_id,
 		);
 
-		MessageResult(Some(self.channels.get_mut(&channel_id).unwrap().clone()))
+		let channel = self.channels.get(&channel_id).unwrap().clone();
+
+		MessageResult(Some(channel))
 	}
 }

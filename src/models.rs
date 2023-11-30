@@ -1,3 +1,4 @@
+use crate::ws::server::CreateMessage;
 use actix_web::{FromRequest, HttpMessage};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,12 @@ impl Message {
 	}
 }
 
+impl From<CreateMessage> for Message {
+	fn from(msg: CreateMessage) -> Self {
+		Self::new(msg.id, msg.channel_id, msg.author.id, &msg.content)
+	}
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct User {
 	pub id: i64,
@@ -73,10 +80,7 @@ pub struct User {
 }
 
 impl User {
-	pub fn new(
-		id: i64, email: &str, username: &str, password: &str,
-		avatar: Option<String>,
-	) -> Self {
+	pub fn new(id: i64, email: &str, username: &str, password: &str) -> Self {
 		User {
 			id,
 			email: email.to_string(),
@@ -84,7 +88,7 @@ impl User {
 			password: password.to_string(),
 			token: uuid::Uuid::new_v4().to_string(),
 			created_at: Utc::now().timestamp() as usize,
-			avatar,
+			avatar: None,
 		}
 	}
 }

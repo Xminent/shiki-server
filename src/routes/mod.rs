@@ -2,6 +2,7 @@ mod api;
 mod auth;
 mod gateway;
 mod middleware;
+mod rtc;
 
 use actix_web::web;
 use mongodb::Client;
@@ -16,5 +17,7 @@ pub fn routes(client: &Client, cfg: &mut web::ServiceConfig) {
 		api::routes(client, cfg);
 	});
 
-	cfg.configure(auth::routes).configure(gateway::routes);
+	cfg.configure(auth::routes)
+		.configure(gateway::routes)
+		.configure(rtc::routes);
 }

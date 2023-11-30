@@ -7,15 +7,13 @@ use crate::{
 use actix::Addr;
 use actix_web::{get, patch, post, web, HttpResponse, Responder};
 use futures::TryStreamExt;
+use futures_util::lock::Mutex;
 use mongodb::{bson::doc, options::FindOptions, Client};
 use serde::{Deserialize, Serialize};
 use snowflake::SnowflakeIdGenerator;
 use std::{
 	collections::{HashMap, HashSet},
-	sync::{
-		atomic::{AtomicUsize, Ordering},
-		Mutex,
-	},
+	sync::atomic::{AtomicUsize, Ordering},
 };
 use validator::Validate;
 
@@ -55,7 +53,7 @@ async fn create_channel(
 	}
 
 	let data = data.into_inner();
-	let id = snowflake_gen.lock().unwrap().real_time_generate();
+	let id = snowflake_gen.lock().await.real_time_generate();
 	let channel = Channel::new(id, &data.name, None, user.id);
 
 	let res = client
@@ -258,6 +256,8 @@ async fn create_message(
 ) -> HttpResponse {
 	let mut data = data.into_inner();
 
+	data.id = snowflake_gen.lock().await.real_time_generate();
+	data.channel_id = channel_id.into_inner();
 	data.author = server::User {
 		id: user.id,
 		username: user.username,
@@ -265,16 +265,10 @@ async fn create_message(
 		avatar: user.avatar,
 	};
 
-	let channel_id = channel_id.into_inner();
-	let id = snowflake_gen.lock().unwrap().real_time_generate();
-	let message = Message::new(id, channel_id, user.id, &data.content);
-
-	data.channel_id = channel_id;
-
 	let res = client
 		.database(DB_NAME)
 		.collection::<Message>(MESSAGE_COLL_NAME)
-		.insert_one(message, None)
+		.insert_one(Message::from(data.clone()), None)
 		.await;
 
 	if res.is_err() {

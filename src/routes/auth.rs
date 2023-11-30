@@ -4,6 +4,7 @@ use crate::{
 	routes::{DB_NAME, USER_COLL_NAME},
 };
 use actix_web::{post, web, HttpResponse};
+use futures_util::lock::Mutex;
 use mongodb::{
 	bson::doc,
 	error::{ErrorKind, WriteFailure},
@@ -11,7 +12,6 @@ use mongodb::{
 };
 use serde::{Deserialize, Serialize};
 use snowflake::SnowflakeIdGenerator;
-use std::sync::Mutex;
 use validator::Validate;
 
 // NOTE: One time setup for unique registration
@@ -34,13 +34,13 @@ pub struct UserInsert {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct UserResponse {
-	pub email: String,
-	pub username: String,
+	pub user_id: i64,
+	pub token: String,
 }
 
 impl From<User> for UserResponse {
-	fn from(user_db: User) -> Self {
-		UserResponse { email: user_db.email, username: user_db.username }
+	fn from(user: User) -> Self {
+		UserResponse { user_id: user.id, token: user.token }
 	}
 }
 
@@ -53,14 +53,13 @@ async fn register(
 		return HttpResponse::BadRequest().json(err);
 	}
 
-	let id = snowflake_gen.lock().unwrap().real_time_generate();
+	let id = snowflake_gen.lock().await.real_time_generate();
 
 	let user = User::new(
 		id,
 		&data.email,
 		&data.username,
 		&auth::hash(data.password.as_bytes()).await,
-		None,
 	);
 
 	let res = client
