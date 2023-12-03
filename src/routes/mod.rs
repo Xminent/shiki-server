@@ -12,11 +12,16 @@ pub const CHANNEL_COLL_NAME: &str = "channels";
 pub const MESSAGE_COLL_NAME: &str = "messages";
 pub const USER_COLL_NAME: &str = "users";
 
+pub async fn setup_indexes(client: &Client) {
+	auth::setup_indexes(client).await;
+}
+
 pub fn routes(client: &Client, cfg: &mut web::ServiceConfig) {
 	cfg.configure(|cfg| {
 		api::routes(client, cfg);
-		auth::routes(client, cfg);
 	});
 
-	cfg.configure(gateway::routes).configure(rtc::routes);
+	cfg.configure(auth::routes)
+		.configure(gateway::routes)
+		.configure(rtc::routes);
 }

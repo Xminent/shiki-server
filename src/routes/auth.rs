@@ -8,7 +8,8 @@ use futures_util::lock::Mutex;
 use mongodb::{
 	bson::doc,
 	error::{ErrorKind, WriteFailure},
-	Client,
+	options::IndexOptions,
+	Client, IndexModel,
 };
 use serde::{Deserialize, Serialize};
 use snowflake::SnowflakeIdGenerator;
@@ -114,26 +115,33 @@ async fn login(
 				Err(_) => HttpResponse::BadRequest().body("Invalid password"),
 			}
 		}
-
-		_ => HttpResponse::InternalServerError().body("Something went wrong"),
+		Ok(None) => HttpResponse::NotFound().body("User not found"),
+		Err(err) => {
+			log::error!("login: {}", err);
+			HttpResponse::InternalServerError().body("Something went wrong")
+		}
 	}
 }
 
-pub fn routes(_client: &Client, cfg: &mut web::ServiceConfig) {
-	// TODO: Maybe perform the index setup here on startup?
-	// // NOTE: One time setup for unique registration
-	// let email_index_model = IndexModel::builder()
-	// 	.keys(doc! {"email": 1})
-	// 	.options(IndexOptions::builder().unique(true).build())
-	// 	.build();
+pub async fn setup_indexes(client: &Client) {
+	let email_index_model = IndexModel::builder()
+		.keys(doc! {"email": 1})
+		.options(IndexOptions::builder().unique(true).build())
+		.build();
 
-	// let collection =
-	// 	client.database(DB_NAME).collection::<User>(USER_COLL_NAME);
+	match client
+		.database(DB_NAME)
+		.collection::<User>(USER_COLL_NAME)
+		.create_index(email_index_model, None)
+		.await
+	{
+		Ok(_) => {}
+		Err(err) => {
+			log::error!("setup_indexes: {}", err);
+		}
+	}
+}
 
-	// let _ = Box::pin(async {
-	// 	log::debug!("Creating index for {}", USER_COLL_NAME);
-	// 	collection.create_index(email_index_model, None).await.unwrap();
-	// });
-
+pub fn routes(cfg: &mut web::ServiceConfig) {
 	cfg.service(web::scope("/auth").service(register).service(login));
 }

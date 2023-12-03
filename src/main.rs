@@ -55,6 +55,8 @@ async fn main() -> std::io::Result<()> {
 	)
 	.unwrap();
 
+	routes::setup_indexes(&db).await;
+
 	let app_state = Arc::new(AtomicUsize::new(0));
 	let snowflake_gen = Arc::new(Mutex::new(SnowflakeIdGenerator::with_epoch(
 		1,

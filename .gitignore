@@ -30,3 +30,5 @@ Cargo.lock
 # Built Visual Studio Code Extensions
 *.vsix
 
+# Docker Compose folders
+.docker/

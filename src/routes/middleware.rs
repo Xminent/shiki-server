@@ -1,4 +1,4 @@
-use crate::{utils::validate_token};
+use crate::utils::validate_token;
 use actix_web::{
 	dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
 	error::ErrorInternalServerError,
