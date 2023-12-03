@@ -3,7 +3,7 @@ use actix::*;
 use actix_cors::Cors;
 use actix_files::Files;
 use actix_web::{
-	error, http,
+	error,
 	middleware::Logger,
 	web::{self},
 	App, HttpResponse, HttpServer,
@@ -14,6 +14,7 @@ use mongodb::{
 	options::{ClientOptions, ResolverConfig},
 	Client,
 };
+use rtc::handler::Handlerr;
 use snowflake::SnowflakeIdGenerator;
 use std::{
 	env,
@@ -29,6 +30,8 @@ mod models;
 mod opus;
 mod opusfile;
 mod routes;
+mod rtc;
+mod speexdsp;
 mod utils;
 mod validator;
 mod ws;
@@ -60,23 +63,29 @@ async fn main() -> std::io::Result<()> {
 	)));
 	let server = ShikiServer::new(db.clone(), app_state.clone()).start();
 	let listen_socket = "0.0.0.0:8081".parse::<SocketAddr>().unwrap();
-	let webrtc_server = Server::new(listen_socket, listen_socket).await?;
+	let public_addr = env::var("RTC_PUBLIC_ADDR")
+		.expect("RTC_PUBLIC_ADDR must be set")
+		.parse::<SocketAddr>()
+		.expect("RTC_PUBLIC_ADDR must be a valid socket address");
+	let webrtc_server = Server::new(listen_socket, public_addr).await?;
 	let session_endpoint =
 		web::Data::new(Mutex::new(webrtc_server.session_endpoint()));
 
 	log::info!("starting HTTP server at http://localhost:8080");
 
 	let http_fut = HttpServer::new(move || {
-		let cors = Cors::default()
-			.allowed_origin(&env::var("CLIENT_URL").unwrap())
-			.allowed_methods(vec!["GET", "POST"])
-			.allowed_headers(vec![
-				http::header::AUTHORIZATION,
-				http::header::ACCEPT,
-				http::header::CONTENT_TYPE,
-			])
-			.allowed_header(http::header::CONTENT_TYPE)
-			.max_age(3600);
+		// let cors = Cors::default()
+		// 	.allowed_origin(&env::var("CLIENT_URL").unwrap())
+		// 	.allowed_methods(vec!["GET", "POST"])
+		// 	.allowed_headers(vec![
+		// 		http::header::AUTHORIZATION,
+		// 		http::header::ACCEPT,
+		// 		http::header::CONTENT_TYPE,
+		// 	])
+		// 	.allowed_header(http::header::CONTENT_TYPE)
+		// 	.max_age(3600);
+
+		let cors = Cors::permissive();
 
 		App::new()
 			.app_data(web::Data::from(app_state.clone()))
@@ -104,24 +113,28 @@ async fn main() -> std::io::Result<()> {
 	.bind(("127.0.0.1", 8080))?
 	.run();
 
+	let webrtc_server = Arc::new(Mutex::new(webrtc_server));
 	let webrtc_fut = recv_spin(webrtc_server);
 
 	future::try_join(http_fut, webrtc_fut).await?;
 	Ok(())
 }
 
-async fn recv_spin(mut webrtc_server: Server) -> std::io::Result<()> {
-	let mut decoder =
-		opus::Decoder::new(48000, opus::Channels::Stereo).unwrap();
-
+async fn recv_spin(webrtc_server: Arc<Mutex<Server>>) -> std::io::Result<()> {
 	let mut message_buf: Vec<u8> = Vec::new();
+	let mut handler = Handlerr::new().map_err(|e| {
+		log::error!("Could not create handler: {}", e);
+		std::io::Error::new(
+			std::io::ErrorKind::Other,
+			"Could not create handler",
+		)
+	})?;
 
 	loop {
-		let received = match webrtc_server.recv().await {
+		let received = match webrtc_server.lock().await.recv().await {
 			Ok(received) => {
 				message_buf.clear();
 				message_buf.extend(received.message.as_ref());
-				// message_buf.append("cool".to_string().into_bytes().as_mut());
 				Some((received.message_type, received.remote_addr))
 			}
 			Err(err) => {
@@ -132,27 +145,61 @@ async fn recv_spin(mut webrtc_server: Server) -> std::io::Result<()> {
 
 		if let Some((message_type, remote_addr)) = received {
 			// TODO: Keep all addrs together. Send their data to everyone but the sender.
-			let result = process_packet(&mut decoder, &message_buf).await;
 
-			if let Err(e) = result {
-				log::error!("Could not decode message: {}", e);
-				// continue;
-			}
-
-			if let Err(e) = webrtc_server
-				.send(&message_buf, message_type, &remote_addr)
-				.await
+			if let Err(e) = process_packet(
+				&mut handler,
+				&message_buf,
+				message_type,
+				webrtc_server.clone(),
+				remote_addr.clone(),
+			)
+			.await
 			{
-				log::error!("Could not send message to {}: {}", remote_addr, e);
+				log::error!("Could not decode message: {}", e);
 			}
 		}
 	}
 }
 
 async fn process_packet(
-	_decoder: &mut opus::Decoder, packet: &[u8],
-) -> std::io::Result<()> {
-	log::debug!("Received {} bytes", packet.len());
+	handler: &mut Handlerr, packet: &[u8],
+	_message_type: webrtc_unreliable::MessageType,
+	_webrtc_server: Arc<Mutex<Server>>, _remote_addr: SocketAddr,
+) -> anyhow::Result<()> {
+	handler
+		.process_packet(packet, |_packets| {
+			// TODO: Do something with the audio packets if we wanted to. They are decoded and resampled here.
+			// let server = webrtc_server.clone();
 
-	Ok(())
+			// Box::pin(async move {
+			// 	let u8_slice = unsafe {
+			// 		std::mem::transmute::<_, &[u8]>(packets[0].as_slice())
+			// 	};
+
+			// 	match server
+			// 		.lock()
+			// 		.await
+			// 		.send(u8_slice, message_type, &remote_addr)
+			// 		.await
+			// 	{
+			// 		Ok(_) => {
+			// 			log::debug!(
+			// 				"Sent {} bytes to {}",
+			// 				u8_slice.len(),
+			// 				remote_addr
+			// 			);
+			// 		}
+			// 		Err(e) => {
+			// 			log::error!(
+			// 				"Could not send packet to {}: {}",
+			// 				remote_addr,
+			// 				e
+			// 			);
+			// 		}
+			// 	}
+			// })
+
+			Box::pin(async move {})
+		})
+		.await
 }

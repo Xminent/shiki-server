@@ -8,6 +8,8 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 #[link(name = "ogg")]
 #[link(name = "opusfile")]
+extern "C" {}
+
 #[cfg(all(debug_assertions, target_os = "windows"))]
 #[link(name = "msvcrtd")]
 extern "C" {}

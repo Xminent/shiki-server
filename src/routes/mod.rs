@@ -15,9 +15,8 @@ pub const USER_COLL_NAME: &str = "users";
 pub fn routes(client: &Client, cfg: &mut web::ServiceConfig) {
 	cfg.configure(|cfg| {
 		api::routes(client, cfg);
+		auth::routes(client, cfg);
 	});
 
-	cfg.configure(auth::routes)
-		.configure(gateway::routes)
-		.configure(rtc::routes);
+	cfg.configure(gateway::routes).configure(rtc::routes);
 }

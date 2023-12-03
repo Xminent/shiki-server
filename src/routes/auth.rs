@@ -14,14 +14,6 @@ use serde::{Deserialize, Serialize};
 use snowflake::SnowflakeIdGenerator;
 use validator::Validate;
 
-// NOTE: One time setup for unique registration
-// let email_index_model = IndexModel::builder()
-//     .keys(doc! {"email": 1})
-//     .options(IndexOptions::builder().unique(true).build())
-//     .build();
-
-// collection.create_index(email_index_model, None).await;
-
 #[derive(Debug, Deserialize, Validate)]
 pub struct UserInsert {
 	#[validate(email)]
@@ -127,6 +119,21 @@ async fn login(
 	}
 }
 
-pub fn routes(cfg: &mut web::ServiceConfig) {
+pub fn routes(_client: &Client, cfg: &mut web::ServiceConfig) {
+	// TODO: Maybe perform the index setup here on startup?
+	// // NOTE: One time setup for unique registration
+	// let email_index_model = IndexModel::builder()
+	// 	.keys(doc! {"email": 1})
+	// 	.options(IndexOptions::builder().unique(true).build())
+	// 	.build();
+
+	// let collection =
+	// 	client.database(DB_NAME).collection::<User>(USER_COLL_NAME);
+
+	// let _ = Box::pin(async {
+	// 	log::debug!("Creating index for {}", USER_COLL_NAME);
+	// 	collection.create_index(email_index_model, None).await.unwrap();
+	// });
+
 	cfg.service(web::scope("/auth").service(register).service(login));
 }

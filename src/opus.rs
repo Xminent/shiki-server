@@ -3,11 +3,14 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 
+use anyhow::Result;
 use std::os::raw::c_int;
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 #[link(name = "opus")]
+extern "C" {}
+
 #[cfg(all(debug_assertions, target_os = "windows"))]
 #[link(name = "msvcrtd")]
 extern "C" {}
@@ -116,14 +119,14 @@ pub struct Decoder {
 
 impl Decoder {
 	/// Create and initialize a decoder.
-	pub fn new(sample_rate: i32, channels: Channels) -> Result<Decoder, i32> {
+	pub fn new(sample_rate: i32, channels: Channels) -> Result<Decoder> {
 		let mut err = -1;
 		let decoder = unsafe {
 			opus_decoder_create(sample_rate, channels as c_int, &mut err)
 		};
 
 		if err != OPUS_OK as i32 || decoder.is_null() {
-			Err(err)
+			Err(anyhow::anyhow!(err))
 		} else {
 			Ok(Decoder { inner: decoder, channels })
 		}
