@@ -2,8 +2,13 @@ use crate::ws::server::ShikiServer;
 use actix::*;
 use actix_cors::Cors;
 use actix_files::Files;
+use actix_session::{
+	storage::{RedisActorSessionStore, SessionStore},
+	SessionMiddleware,
+};
 use actix_web::{
-	error,
+	cookie::Key,
+	error, http,
 	middleware::Logger,
 	web::{self},
 	App, HttpResponse, HttpServer,
@@ -24,7 +29,6 @@ use std::{
 };
 use webrtc_unreliable::Server;
 
-mod auth;
 mod errors;
 mod models;
 mod opus;
@@ -44,6 +48,9 @@ async fn main() -> std::io::Result<()> {
 		env_logger::Env::new().default_filter_or("debug"),
 	);
 
+	let session_key = env::var("SESSION_KEY")
+		.expect("You must set the SESSION_KEY environment var!");
+
 	let db = Client::with_options(
 		ClientOptions::parse_with_resolver_config(
 			&env::var("MONGODB_URI")
@@ -54,6 +61,15 @@ async fn main() -> std::io::Result<()> {
 		.expect("Failed to parse MONGODB_URI"),
 	)
 	.unwrap();
+
+	let store = RedisActorSessionStore::new(
+		&env::var("REDIS_URL").expect("REDIS_URL must be set"),
+	);
+
+	store
+		.load(&session_key.clone().try_into().unwrap())
+		.await
+		.expect("Failed to connect to Redis");
 
 	routes::setup_indexes(&db).await;
 
@@ -76,18 +92,19 @@ async fn main() -> std::io::Result<()> {
 	log::info!("starting HTTP server at http://localhost:8080");
 
 	let http_fut = HttpServer::new(move || {
-		// let cors = Cors::default()
-		// 	.allowed_origin(&env::var("CLIENT_URL").unwrap())
-		// 	.allowed_methods(vec!["GET", "POST"])
-		// 	.allowed_headers(vec![
-		// 		http::header::AUTHORIZATION,
-		// 		http::header::ACCEPT,
-		// 		http::header::CONTENT_TYPE,
-		// 	])
-		// 	.allowed_header(http::header::CONTENT_TYPE)
-		// 	.max_age(3600);
-
-		let cors = Cors::permissive();
+		let cors = Cors::default()
+			.allowed_origin(
+				&env::var("CLIENT_URL").expect("CLIENT_URL must be set"),
+			)
+			.allowed_methods(vec!["GET", "POST", "PATCH", "DELETE"])
+			.allowed_headers(vec![
+				http::header::AUTHORIZATION,
+				http::header::ACCEPT,
+			])
+			.allowed_header(http::header::CONTENT_TYPE)
+			.expose_headers(&[actix_web::http::header::CONTENT_DISPOSITION])
+			.supports_credentials()
+			.max_age(3600);
 
 		App::new()
 			.app_data(web::Data::from(app_state.clone()))
@@ -105,6 +122,15 @@ async fn main() -> std::io::Result<()> {
 				.into()
 			}))
 			.service(Files::new("/static", "./static"))
+			.wrap(
+				SessionMiddleware::builder(
+					RedisActorSessionStore::new(
+						&env::var("REDIS_URL").expect("REDIS_URL must be set"),
+					),
+					Key::from(session_key.as_bytes()),
+				)
+				.build(),
+			)
 			.wrap(Logger::default())
 			.wrap(cors)
 			.configure(|cfg| {

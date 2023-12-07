@@ -6,6 +6,7 @@ use crate::{
 	ws::events::Ready,
 };
 use actix::prelude::*;
+use chrono::Utc;
 use futures_util::TryStreamExt;
 use mongodb::{bson::doc, Client};
 use rand::{self, rngs::ThreadRng, Rng};
@@ -100,6 +101,14 @@ pub struct CreateMessage {
 	/// User who sent the message
 	#[serde(skip_deserializing)]
 	pub author: User,
+	/// Message creation time
+	#[serde(default = "current_utc_timestamp", skip_deserializing)]
+	pub created_at: usize,
+}
+
+fn current_utc_timestamp() -> usize {
+	let utc_now = Utc::now();
+	utc_now.timestamp() as usize
 }
 
 /// List of available channels
@@ -404,12 +413,7 @@ impl Handler<CreateMessage> for ShikiServer {
 			return MessageResult(None);
 		}
 
-		let event = events::MessageCreate::new(
-			msg.id,
-			msg.content.clone(),
-			msg.channel_id,
-			msg.author.clone(),
-		);
+		let event = events::MessageCreate::from(msg.clone());
 
 		self.send_channel_message(
 			msg.channel_id,

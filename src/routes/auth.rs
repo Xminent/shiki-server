@@ -1,9 +1,10 @@
 use crate::{
-	auth,
 	models::User,
 	routes::{DB_NAME, USER_COLL_NAME},
+	utils,
 };
-use actix_web::{post, web, HttpResponse};
+use actix_session::Session;
+use actix_web::{get, post, web, HttpResponse};
 use futures_util::lock::Mutex;
 use mongodb::{
 	bson::doc,
@@ -52,7 +53,7 @@ async fn register(
 		id,
 		&data.email,
 		&data.username,
-		&auth::hash(data.password.as_bytes()).await,
+		&utils::hash(data.password.as_bytes()).await,
 	);
 
 	let res = client
@@ -90,7 +91,7 @@ struct UserLogin {
 
 #[post("/login")]
 async fn login(
-	client: web::Data<Client>, data: web::Json<UserLogin>,
+	client: web::Data<Client>, data: web::Json<UserLogin>, session: Session,
 ) -> HttpResponse {
 	if let Err(err) = data.validate() {
 		return HttpResponse::BadRequest().json(err);
@@ -105,21 +106,36 @@ async fn login(
 
 	match res {
 		Ok(Some(user)) => {
-			match auth::verify_password(
+			match utils::verify_password(
 				&user.password,
 				data.password.as_bytes(),
 			)
 			.await
 			{
-				Ok(_) => HttpResponse::Ok().json(UserResponse::from(user)),
+				Ok(_) => {
+					session.insert("user", user.clone()).unwrap();
+					session.renew();
+
+					HttpResponse::Ok().json(UserResponse::from(user))
+				}
 				Err(_) => HttpResponse::BadRequest().body("Invalid password"),
 			}
 		}
-		Ok(None) => HttpResponse::NotFound().body("User not found"),
+		Ok(None) => HttpResponse::BadRequest().body("User not found"),
 		Err(err) => {
 			log::error!("login: {}", err);
 			HttpResponse::InternalServerError().body("Something went wrong")
 		}
+	}
+}
+
+#[get("/user")]
+async fn get_user(session: Session) -> HttpResponse {
+	let user = session.get::<User>("user");
+
+	match user {
+		Ok(Some(user)) => HttpResponse::Ok().json(user),
+		_ => HttpResponse::Unauthorized().body("Unauthorized"),
 	}
 }
 

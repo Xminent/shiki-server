@@ -1,4 +1,4 @@
-use super::server::Channel;
+use super::server::{Channel, CreateMessage};
 use crate::ws::server::User;
 use actix::Message;
 use derives::HasOpcode;
@@ -68,13 +68,19 @@ pub struct MessageCreate {
 	pub channel_id: i64,
 	/// The author of the message.
 	pub author: User,
+	/// The creation date of the message
+	pub created_at: usize,
 }
 
-impl MessageCreate {
-	pub fn new(
-		id: i64, content: String, channel_id: i64, author: User,
-	) -> Self {
-		Self { id, content, channel_id, author }
+impl From<CreateMessage> for MessageCreate {
+	fn from(msg: CreateMessage) -> Self {
+		Self {
+			id: msg.id,
+			content: msg.content,
+			channel_id: msg.channel_id,
+			author: msg.author,
+			created_at: msg.created_at,
+		}
 	}
 }
 
