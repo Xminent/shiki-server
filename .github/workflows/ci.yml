@@ -29,3 +29,59 @@ jobs:
 
       - name: Build
         run: cargo build --verbose
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v3
+        with:
+          name: shiki-server
+          path: ./target/debug/shiki-server
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Get Next Version
+        id: semver
+        uses: ietf-tools/semver-action@v1
+        with:
+          token: ${{ github.token }}
+          branch: dev
+
+      - name: Update CHANGELOG
+        id: changelog
+        uses: requarks/changelog-action@v1
+        with:
+          token: ${{ github.token }}
+          tag: ${{ steps.semver.outputs.next }}
+          writeToFile: false
+
+      - name: Create Release
+        uses: ncipollo/release-action@v1.12.0
+        with:
+          prerelease: true
+          allowUpdates: true
+          draft: false
+          makeLatest: true
+          commit: ${{ github.sha }}
+          name: ${{ steps.semver.outputs.next }}
+          body: ${{ steps.changelog.outputs.changes }}
+          token: ${{ github.token }}
+
+      - name: Download binaries
+        uses: actions/download-artifact@v3
+        with:
+          name: shiki-server
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ github.token }}
+          file: shiki-server
+          asset_name: shiki-server-linux-amd64
+          tag: ${{ steps.semver.outputs.next }}
