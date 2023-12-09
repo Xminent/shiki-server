@@ -52,12 +52,23 @@ jobs:
           token: ${{ github.token }}
           branch: dev
 
+      - name: Create Draft Release
+        uses: ncipollo/release-action@v1.12.0
+        with:
+          prerelease: true
+          draft: false
+          commit: ${{ github.sha }}
+          tag: ${{ steps.semver.outputs.next }}
+          name: ${{ steps.semver.outputs.next }}
+          body: "*pending*"
+          token: ${{ github.token }}
+
       - name: Update CHANGELOG
         id: changelog
         uses: requarks/changelog-action@v1
         with:
           token: ${{ github.token }}
-          tag: ${{ steps.semver.outputs.current }}
+          tag: ${{ steps.semver.outputs.next }}
           writeToFile: false
 
       - name: Create Release
