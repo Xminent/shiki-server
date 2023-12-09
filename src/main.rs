@@ -22,6 +22,7 @@ use mongodb::{
 use rtc::handler::Handlerr;
 use snowflake::SnowflakeIdGenerator;
 use std::{
+	collections::HashSet,
 	env,
 	net::SocketAddr,
 	sync::{atomic::AtomicUsize, Arc},
@@ -37,7 +38,6 @@ mod routes;
 mod rtc;
 mod speexdsp;
 mod utils;
-mod validator;
 mod ws;
 
 #[actix_web::main]
@@ -62,9 +62,8 @@ async fn main() -> std::io::Result<()> {
 	)
 	.unwrap();
 
-	let store = RedisActorSessionStore::new(
-		&env::var("REDIS_URL").expect("REDIS_URL must be set"),
-	);
+	let redis_url = env::var("REDIS_URL").expect("REDIS_URL must be set");
+	let store = RedisActorSessionStore::new(redis_url.clone());
 
 	store
 		.load(&session_key.clone().try_into().unwrap())
@@ -124,9 +123,7 @@ async fn main() -> std::io::Result<()> {
 			.service(Files::new("/static", "./static"))
 			.wrap(
 				SessionMiddleware::builder(
-					RedisActorSessionStore::new(
-						&env::var("REDIS_URL").expect("REDIS_URL must be set"),
-					),
+					RedisActorSessionStore::new(redis_url.clone()),
 					Key::from(session_key.as_bytes()),
 				)
 				.build(),
@@ -157,6 +154,7 @@ async fn recv_spin(webrtc_server: Arc<Mutex<Server>>) -> std::io::Result<()> {
 			"Could not create handler",
 		)
 	})?;
+	let mut clients = HashSet::new();
 
 	loop {
 		let received = match webrtc_server.lock().await.recv().await {
@@ -172,14 +170,15 @@ async fn recv_spin(webrtc_server: Arc<Mutex<Server>>) -> std::io::Result<()> {
 		};
 
 		if let Some((message_type, remote_addr)) = received {
-			// TODO: Keep all addrs together. Send their data to everyone but the sender.
+			clients.insert(remote_addr);
 
 			if let Err(e) = process_packet(
 				&mut handler,
 				&message_buf,
 				message_type,
 				webrtc_server.clone(),
-				remote_addr.clone(),
+				remote_addr,
+				&mut clients,
 			)
 			.await
 			{
@@ -190,44 +189,81 @@ async fn recv_spin(webrtc_server: Arc<Mutex<Server>>) -> std::io::Result<()> {
 }
 
 async fn process_packet(
-	handler: &mut Handlerr, packet: &[u8],
-	_message_type: webrtc_unreliable::MessageType,
-	_webrtc_server: Arc<Mutex<Server>>, _remote_addr: SocketAddr,
+	_handler: &mut Handlerr, packet: &[u8],
+	message_type: webrtc_unreliable::MessageType,
+	webrtc_server: Arc<Mutex<Server>>, _remote_addr: SocketAddr,
+	clients: &mut HashSet<SocketAddr>,
 ) -> anyhow::Result<()> {
-	handler
-		.process_packet(packet, |_packets| {
-			// TODO: Do something with the audio packets if we wanted to. They are decoded and resampled here.
-			// let server = webrtc_server.clone();
+	// let _ = handler
+	// 	.process_packet(packet, |_packets| {
+	// 		log::debug!(
+	// 			"Got {} packets totalling {} bytes",
+	// 			_packets.len(),
+	// 			_packets.iter().map(|p| p.len()).sum::<usize>()
+	// 		);
 
-			// Box::pin(async move {
-			// 	let u8_slice = unsafe {
-			// 		std::mem::transmute::<_, &[u8]>(packets[0].as_slice())
-			// 	};
+	// 		// TODO: Do something with the audio packets if we wanted to. They are decoded and resampled here.
+	// 		// let server = webrtc_server.clone();
 
-			// 	match server
-			// 		.lock()
-			// 		.await
-			// 		.send(u8_slice, message_type, &remote_addr)
-			// 		.await
-			// 	{
-			// 		Ok(_) => {
-			// 			log::debug!(
-			// 				"Sent {} bytes to {}",
-			// 				u8_slice.len(),
-			// 				remote_addr
-			// 			);
-			// 		}
-			// 		Err(e) => {
-			// 			log::error!(
-			// 				"Could not send packet to {}: {}",
-			// 				remote_addr,
-			// 				e
-			// 			);
-			// 		}
-			// 	}
-			// })
+	// 		// Box::pin(async move {
+	// 		// 	let u8_slice = unsafe {
+	// 		// 		std::mem::transmute::<_, &[u8]>(packets[0].as_slice())
+	// 		// 	};
 
-			Box::pin(async move {})
-		})
-		.await
+	// 		// 	match server
+	// 		// 		.lock()
+	// 		// 		.await
+	// 		// 		.send(u8_slice, message_type, &remote_addr)
+	// 		// 		.await
+	// 		// 	{
+	// 		// 		Ok(_) => {
+	// 		// 			log::debug!(
+	// 		// 				"Sent {} bytes to {}",
+	// 		// 				u8_slice.len(),
+	// 		// 				remote_addr
+	// 		// 			);
+	// 		// 		}
+	// 		// 		Err(e) => {
+	// 		// 			log::error!(
+	// 		// 				"Could not send packet to {}: {}",
+	// 		// 				remote_addr,
+	// 		// 				e
+	// 		// 			);
+	// 		// 		}
+	// 		// 	}
+	// 		// })
+
+	// 		Box::pin(async move {})
+	// 	})
+	// 	.await;
+
+	let mut to_remove = vec![];
+
+	// Send them to everyone else but the sender.
+	for client in clients.iter() {
+		// if client == &remote_addr {
+		// 	continue;
+		// }
+
+		log::debug!("Sending {} bytes to {}", packet.len(), client);
+
+		match webrtc_server
+			.lock()
+			.await
+			.send(packet, message_type, client)
+			.await
+		{
+			Ok(_) => {}
+			Err(e) => {
+				log::error!("Could not send packet to {}: {}", client, e);
+				to_remove.push(*client);
+			}
+		}
+	}
+
+	for client in to_remove {
+		clients.remove(&client);
+	}
+
+	Ok(())
 }

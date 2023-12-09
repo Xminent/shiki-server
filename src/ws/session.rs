@@ -86,19 +86,14 @@ impl GatewaySession {
 		log::debug!("Received opcode: {:?}", opcode);
 		log::debug!("Received data: {:?}", data);
 
-		match opcode {
-			Opcode::Identify => {
-				let token = data
-					.get("token")
-					.and_then(|t| t.as_str())
-					.ok_or(anyhow::anyhow!("no token"))?
-					.to_string();
+		if opcode == Opcode::Identify {
+			let token = data
+				.get("token")
+				.and_then(|t| t.as_str())
+				.ok_or(anyhow::anyhow!("no token"))?
+				.to_string();
 
-				self.addr
-					.do_send(server::Identify { id: self.session_id, token });
-			}
-
-			_ => (),
+			self.addr.do_send(server::Identify { id: self.session_id, token });
 		}
 
 		Ok(())

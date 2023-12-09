@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::{
 	opus::{Channels, Decoder},
 	speexdsp::{self, Resampler},
@@ -48,6 +50,7 @@ impl Handlerr {
 	}
 
 	pub fn init(&mut self) {
+		log::debug!("Initializing Decoder");
 		self.reset_output_buffers();
 	}
 
