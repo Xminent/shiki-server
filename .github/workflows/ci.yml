@@ -37,7 +37,6 @@ jobs:
           path: ./target/debug/shiki-server
 
   release:
-    name: Release
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
@@ -58,7 +57,7 @@ jobs:
         uses: requarks/changelog-action@v1
         with:
           token: ${{ github.token }}
-          tag: ${{ steps.semver.outputs.next }}
+          tag: ${{ steps.semver.outputs.current }}
           writeToFile: false
 
       - name: Create Release
