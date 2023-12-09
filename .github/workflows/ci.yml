@@ -98,8 +98,8 @@ jobs:
           prerelease: true
           draft: false
           commit: ${{ github.sha }}
-          tag: ${{ steps.semver.outputs.next }}
-          name: ${{ steps.semver.outputs.next }}
+          tag: ${{ steps.semver.outputs.next }}-dev
+          name: ${{ steps.semver.outputs.next }}-dev
           body: "*pending*"
           token: ${{ github.token }}
 
@@ -108,7 +108,7 @@ jobs:
         uses: requarks/changelog-action@v1
         with:
           token: ${{ github.token }}
-          tag: ${{ steps.semver.outputs.next }}
+          tag: ${{ steps.semver.outputs.next }}-dev
           writeToFile: false
 
       - name: Create Release
@@ -119,8 +119,8 @@ jobs:
           draft: false
           makeLatest: true
           commit: ${{ github.sha }}
-          tag: ${{ steps.semver.outputs.next }}
-          name: ${{ steps.semver.outputs.next }}
+          tag: ${{ steps.semver.outputs.next }}-dev
+          name: ${{ steps.semver.outputs.next }}-dev
           body: ${{ steps.changelog.outputs.changes }}
           token: ${{ github.token }}
 
@@ -135,4 +135,4 @@ jobs:
           repo_token: ${{ github.token }}
           file: shiki-server
           asset_name: shiki-server-linux-amd64
-          tag: ${{ steps.semver.outputs.next }}
+          tag: ${{ steps.semver.outputs.next }}-dev
