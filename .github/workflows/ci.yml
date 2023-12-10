@@ -8,16 +8,36 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - { name: ubuntu-latest, binary_name: shiki-server }
+          - { name: macos-latest, binary_name: shiki-server }
+          - { name: windows-latest, binary_name: shiki-server.exe }
+
+    name: build-${{ matrix.os.name }}
+    runs-on: ${{ matrix.os.name }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Install dependencies
+      - name: Add MSBuild to PATH
+        if: runner.os == 'Windows'
+        uses: microsoft/setup-msbuild@v1.1
+
+      - name: Install Dependencies
         run: |
-          sudo apt update
-          sudo apt install -y cmake clang libssl-dev pkg-config
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt update
+            sudo apt install -y cmake clang libssl-dev pkg-config
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            choco install -y llvm
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            brew install cmake llvm openssl
+          fi
+        shell: bash
 
       - name: Install Conan
         uses: turtlebrowser/get-conan@main
@@ -73,12 +93,21 @@ jobs:
       - name: Upload binaries
         uses: actions/upload-artifact@v3
         with:
-          name: shiki-server
-          path: ./target/release/shiki-server
+          name: ${{ matrix.os.binary_name }}
+          path: ./target/release/${{ matrix.os.binary_name }}
 
   release:
     needs: build
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - { name: ubuntu-latest, binary_name: shiki-server }
+          - { name: macos-latest, binary_name: shiki-server }
+          - { name: windows-latest, binary_name: shiki-server.exe }
+
+    name: release-${{ matrix.os.name }}
+    runs-on: ${{ matrix.os.name }}
     if: github.event_name == 'push'
 
     steps:
@@ -127,12 +156,12 @@ jobs:
       - name: Download binaries
         uses: actions/download-artifact@v3
         with:
-          name: shiki-server
+          name: ${{ matrix.os.binary_name }}
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ github.token }}
-          file: shiki-server
-          asset_name: shiki-server-linux-amd64
+          file: ${{ matrix.os.binary_name }}
+          asset_name: ${{ matrix.os.binary_name }}-${{ matrix.os.name }}
           tag: ${{ steps.semver.outputs.next }}-dev
