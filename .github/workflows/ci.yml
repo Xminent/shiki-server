@@ -32,8 +32,6 @@ jobs:
           if [ "$RUNNER_OS" == "Linux" ]; then
             sudo apt update
             sudo apt install -y cmake clang libssl-dev pkg-config
-          elif [ "$RUNNER_OS" == "Windows" ]; then
-            choco install -y llvm
           fi
         shell: bash
 
@@ -49,11 +47,16 @@ jobs:
           version: 1.60.0
 
       - name: Set up Clang
-        if: runner.os == 'Linux' || runner.os == 'Windows'
+        if: runner.os == 'Windows'
         uses: egor-tensin/setup-clang@v1
         with:
           version: latest
           platform: x64
+
+      - run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
+        if: runner.os == 'Windows'
+      - run: vcpkg install openssl:x64-windows-static-md
+        if: runner.os == 'Windows'
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1
