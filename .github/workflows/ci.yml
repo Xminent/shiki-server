@@ -36,7 +36,7 @@ jobs:
             choco install -y llvm
             choco install -y conan --version 1.60.0
           elif [ "$RUNNER_OS" == "macOS" ]; then
-            brew install conan@1.62.0 cmake llvm openssl
+            brew install conan@1 cmake llvm openssl
           fi
         shell: bash
 
