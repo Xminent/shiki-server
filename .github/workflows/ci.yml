@@ -14,7 +14,7 @@ jobs:
         os:
           - { name: ubuntu-latest, binary_name: shiki-server }
           - { name: macos-latest, binary_name: shiki-server }
-          - { name: windows-2022, binary_name: shiki-server.exe }
+          - { name: windows-latest, binary_name: shiki-server.exe }
 
     name: build-${{ matrix.os.name }}
     runs-on: ${{ matrix.os.name }}
@@ -53,10 +53,15 @@ jobs:
           version: latest
           platform: x64
 
-      - run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Install OpenSSL
         if: runner.os == 'Windows'
-      - run: vcpkg install openssl:x64-windows-static-md
-        if: runner.os == 'Windows'
+        uses: johnwason/vcpkg-action@v5
+        id: vcpkg
+        with:
+          pkgs: openssl
+          triplet: x64-windows-static-md
+          cache-key: ${{ runner.os }}-vcpkg
+          token: ${{ github.token }}
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1
@@ -85,12 +90,9 @@ jobs:
           cargo clippy -- -D warnings
 
       - name: Install cargo check tools
-        run: |
-          cargo install --locked cargo-deny || true
-          cargo install --locked cargo-outdated || true
-          cargo install --locked cargo-udeps || true
-          cargo install --locked cargo-audit || true
-          cargo install --locked cargo-pants || true
+        uses: brndnmtthws/rust-action-cargo-binstall@v1
+        with:
+          packages: cargo-deny cargo-outdated cargo-udeps cargo-audit cargo-pants
 
       # - name: Check
       #   run: |
