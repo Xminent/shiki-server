@@ -63,6 +63,9 @@ jobs:
           cache-key: ${{ runner.os }}-vcpkg
           token: ${{ github.token }}
 
+      - run: echo "VCPKG_ROOT=${{ github.workspace }}\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+        if: runner.os == 'Windows'
+
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
