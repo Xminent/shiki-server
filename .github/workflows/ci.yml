@@ -37,6 +37,9 @@ jobs:
             choco install -y conan --version 1.60.0
           elif [ "$RUNNER_OS" == "macOS" ]; then
             brew install conan@1 cmake llvm openssl
+            echo "PATH=/usr/local/opt/llvm/bin:$PATH" >> $GITHUB_ENV
+            echo "LDFLAGS='-L/usr/local/opt/llvm/lib'" >> $GITHUB_ENV
+            echo "CPPFLAGS='-I/usr/local/opt/llvm/include'" >> $GITHUB_ENV
           fi
         shell: bash
 
