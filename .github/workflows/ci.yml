@@ -14,7 +14,7 @@ jobs:
         os:
           - { name: ubuntu-latest, binary_name: shiki-server }
           - { name: macos-latest, binary_name: shiki-server }
-          - { name: windows-latest, binary_name: shiki-server.exe }
+          - { name: windows-2022, binary_name: shiki-server.exe }
 
     name: build-${{ matrix.os.name }}
     runs-on: ${{ matrix.os.name }}
@@ -33,22 +33,26 @@ jobs:
             sudo apt update
             sudo apt install -y cmake clang libssl-dev pkg-config
           elif [ "$RUNNER_OS" == "Windows" ]; then
-            choco install -y llvm openssl
-            choco install -y conan --version 1.60.0
-          elif [ "$RUNNER_OS" == "macOS" ]; then
-            brew install conan@1 cmake llvm openssl
-            echo "PATH=/usr/local/opt/conan@1/bin:$PATH" >> $GITHUB_ENV
-            echo "PATH=/usr/local/opt/llvm/bin:$PATH" >> $GITHUB_ENV
-            echo "LDFLAGS='-L/usr/local/opt/llvm/lib'" >> $GITHUB_ENV
-            echo "CPPFLAGS='-I/usr/local/opt/llvm/include'" >> $GITHUB_ENV
-          fi
+            choco install -y llvm
         shell: bash
 
-      - name: Install Conan (Linux)
-        if: runner.os == 'Linux'
+      - name: Select Python 3.10
+        if: runner.os == 'macOS'
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install Conan
         uses: turtlebrowser/get-conan@main
         with:
           version: 1.60.0
+
+      - name: Set up Clang
+        if: runner.os == 'Linux' || runner.os == 'Windows'
+        uses: egor-tensin/setup-clang@v1
+        with:
+          version: latest
+          platform: x64
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1
