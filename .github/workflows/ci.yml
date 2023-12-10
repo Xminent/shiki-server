@@ -34,12 +34,14 @@ jobs:
             sudo apt install -y cmake clang libssl-dev pkg-config
           elif [ "$RUNNER_OS" == "Windows" ]; then
             choco install -y llvm
+            choco install -y conan --version 1.60.0
           elif [ "$RUNNER_OS" == "macOS" ]; then
-            brew install cmake llvm openssl
+            brew install conan@1.62.0 cmake llvm openssl
           fi
         shell: bash
 
-      - name: Install Conan
+      - name: Install Conan (Linux)
+        if: runner.os == 'Linux'
         uses: turtlebrowser/get-conan@main
         with:
           version: 1.60.0
