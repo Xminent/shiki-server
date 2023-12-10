@@ -34,6 +34,7 @@ jobs:
             sudo apt install -y cmake clang libssl-dev pkg-config
           elif [ "$RUNNER_OS" == "Windows" ]; then
             choco install -y llvm
+          fi
         shell: bash
 
       - name: Select Python 3.10
