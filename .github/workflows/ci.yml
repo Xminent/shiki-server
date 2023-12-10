@@ -12,9 +12,21 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - { name: ubuntu-latest, binary_name: shiki-server }
-          - { name: macos-latest, binary_name: shiki-server }
-          - { name: windows-latest, binary_name: shiki-server.exe }
+          - {
+              name: ubuntu-latest,
+              binary_name: shiki-server,
+              output_name: shiki-server-linux-amd64,
+            }
+          - {
+              name: macos-latest,
+              binary_name: shiki-server,
+              output_name: shiki-server-macos-amd64,
+            }
+          - {
+              name: windows-latest,
+              binary_name: shiki-server.exe,
+              output_name: shiki-server-windows-amd64,
+            }
 
     name: build-${{ matrix.os.name }}
     runs-on: ${{ matrix.os.name }}
@@ -112,7 +124,7 @@ jobs:
       - name: Upload binaries
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ matrix.os.binary_name }}
+          name: ${{ matrix.os.output_name }}
           path: ./target/release/${{ matrix.os.binary_name }}
 
   release:
@@ -121,9 +133,9 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - { name: ubuntu-latest, binary_name: shiki-server }
-          - { name: macos-latest, binary_name: shiki-server }
-          - { name: windows-latest, binary_name: shiki-server.exe }
+          - { name: ubuntu-latest, binary_name: shiki-server-linux-amd64 }
+          - { name: macos-latest, binary_name: shiki-server-macos-amd64 }
+          - { name: windows-latest, binary_name: shiki-server-windows-amd64 }
 
     name: release-${{ matrix.os.name }}
     runs-on: ${{ matrix.os.name }}
