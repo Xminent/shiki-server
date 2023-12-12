@@ -1,7 +1,7 @@
 use crate::ws::server::ShikiServer;
 use actix::*;
 use actix_cors::Cors;
-use actix_files::Files;
+
 use actix_session::{
 	storage::{RedisActorSessionStore, SessionStore},
 	SessionMiddleware,
@@ -42,7 +42,12 @@ mod ws;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-	dotenv().expect("Failed to read .env file");
+	match dotenv() {
+		Ok(_) => {}
+		Err(_) => {
+			log::warn!("No .env file found. Regular env vars will be read.");
+		}
+	}
 
 	env_logger::init_from_env(
 		env_logger::Env::new().default_filter_or("debug"),
@@ -120,7 +125,6 @@ async fn main() -> std::io::Result<()> {
 				)
 				.into()
 			}))
-			.service(Files::new("/static", "./static"))
 			.wrap(
 				SessionMiddleware::builder(
 					RedisActorSessionStore::new(redis_url.clone()),
@@ -135,7 +139,7 @@ async fn main() -> std::io::Result<()> {
 			})
 	})
 	.workers(2)
-	.bind(("127.0.0.1", 8080))?
+	.bind(("0.0.0.0", 8080))?
 	.run();
 
 	let webrtc_server = Arc::new(Mutex::new(webrtc_server));
