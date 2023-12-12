@@ -380,13 +380,16 @@ impl Handler<Identify> for ShikiServer {
 impl Handler<Channel> for ShikiServer {
 	type Result = MessageResult<Channel>;
 
-	fn handle(&mut self, msg: Channel, _: &mut Context<Self>) -> Self::Result {
+	fn handle(
+		&mut self, mut msg: Channel, _: &mut Context<Self>,
+	) -> Self::Result {
 		log::info!("Channel created");
 
 		if self.channels.contains_key(&msg.id) {
 			return MessageResult(None);
 		}
 
+		msg.sessions = self.sessions.keys().cloned().collect();
 		self.channels.insert(msg.id, msg.clone());
 
 		self.send_to_everyone(
