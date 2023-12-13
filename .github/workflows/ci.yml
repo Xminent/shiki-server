@@ -127,6 +127,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
+            ${{ env.CONAN_USER_HOME }}
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
@@ -179,6 +180,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
+      - name: Get tags
+        run: git fetch --tags origin
+
       - name: Get Latest Tag
         id: latest-tag
         run: |
@@ -192,6 +196,7 @@ jobs:
             latest_tag=""
           fi
 
+          echo "Current Tag: $latest_tag"
           echo "::set-output name=tag::$latest_tag"
         shell: bash
 
