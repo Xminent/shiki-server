@@ -71,12 +71,16 @@ jobs:
         id: vcpkg
         with:
           pkgs: openssl
-          triplet: x64-windows-static-md
+          triplet: x64-windows-static
           cache-key: ${{ runner.os }}-vcpkg
           token: ${{ github.token }}
 
-      - run: echo "VCPKG_ROOT=${{ github.workspace }}\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Add VCPKG_ROOT and OPENSSL env vars
         if: runner.os == 'Windows'
+        run: |
+          echo "OPENSSL_NO_VENDOR=1" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "OPENSSL_DIR=${{ github.workspace }}\vcpkg\installed\x64-windows-static" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "VCPKG_ROOT=${{ github.workspace }}\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1
@@ -104,10 +108,16 @@ jobs:
           cargo fmt --all -- --check
           cargo clippy -- -D warnings
 
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
       - name: Install cargo check tools
-        uses: brndnmtthws/rust-action-cargo-binstall@v1
-        with:
-          packages: cargo-deny cargo-outdated cargo-udeps cargo-audit cargo-pants
+        run: |
+          which cargo-deny || cargo binstall cargo-deny
+          which cargo-outdated || cargo binstall cargo-outdated
+          which cargo-udeps || cargo binstall cargo-udeps
+          which cargo-audit || cargo binstall cargo-audit
+          which cargo-pants || cargo binstall cargo-pants
 
       # - name: Check
       #   run: |

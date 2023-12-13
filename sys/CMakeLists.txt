@@ -43,7 +43,7 @@ conan_cmake_install(
     PATH_OR_REFERENCE
     .
     BUILD
-    missing
+    all
     REMOTE
     conancenter
     SETTINGS
