@@ -183,7 +183,7 @@ jobs:
         id: latest-tag
         run: |
           if [[ "${{ github.ref }}" == 'refs/heads/dev' ]]; then
-            latest_tag=$(git tag -l | grep "\-dev" | sed 's/-dev$//' | sort -V | tail -n 1 || true)
+            latest_tag=$(git tag -l | grep "\-dev" | sort -V | tail -n 1 || true)
           else
             latest_tag=$(git tag -l | grep -v "\-dev" | sort -V | tail -n 1 || true)
           fi
@@ -220,7 +220,7 @@ jobs:
         with:
           token: ${{ github.token }}
           fromTag: ${{ steps.semver.outputs.next }}${{ env.TAG_SUFFIX }}
-          toTag: ${{ steps.semver.outputs.current }}${{ env.TAG_SUFFIX }}
+          toTag: ${{ steps.latest-tag.outputs.tag }}
           writeToFile: false
 
       - name: Create Release
