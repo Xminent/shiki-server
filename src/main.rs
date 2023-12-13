@@ -199,7 +199,7 @@ async fn recv_spin(webrtc_server: Arc<Mutex<Server>>) -> std::io::Result<()> {
 async fn process_packet(
 	_handler: &mut Handlerr, packet: &[u8],
 	message_type: webrtc_unreliable::MessageType,
-	webrtc_server: Arc<Mutex<Server>>, _remote_addr: SocketAddr,
+	webrtc_server: Arc<Mutex<Server>>, remote_addr: SocketAddr,
 	clients: &mut HashSet<SocketAddr>,
 ) -> anyhow::Result<()> {
 	// let _ = handler
@@ -249,9 +249,9 @@ async fn process_packet(
 
 	// Send them to everyone else but the sender.
 	for client in clients.iter() {
-		// if client == &remote_addr {
-		// 	continue;
-		// }
+		if client == &remote_addr {
+			continue;
+		}
 
 		log::debug!("Sending {} bytes to {}", packet.len(), client);
 
