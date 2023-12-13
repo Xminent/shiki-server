@@ -247,7 +247,6 @@ async fn process_packet(
 
 	let mut to_remove = vec![];
 
-	// Send them to everyone else but the sender.
 	for client in clients.iter() {
 		if client == &remote_addr {
 			continue;
