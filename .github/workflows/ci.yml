@@ -2,34 +2,69 @@ name: CI
 
 on:
   push:
-    branches: ["dev"]
+    branches:
+      - main
+      - dev
   pull_request:
-    branches: ["dev"]
+    branches:
+      - main
+      - dev
+
+env:
+  BRANCH_NAME: ${{ github.ref == 'refs/heads/dev' && 'dev' || 'main' }}
+  PRERELEASE: ${{ github.ref == 'refs/heads/dev' && 'true' || 'false' }}
+  TAG_SUFFIX: ${{ github.ref == 'refs/heads/dev' && '-dev' || '' }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-22.04
+    outputs:
+      build: ${{ steps.filter.outputs.src }}
+      ci: ${{ steps.filter.outputs.ci }}
+
+    steps:
+      - name: Checkout
+        if: github.event_name == 'push'
+        uses: actions/checkout@v3
+
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          base: ${{ env.BRANCH_NAME }}
+          filters: |
+            src:
+              - '**/*.rs'
+              - 'sys/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+            ci:
+              - '.github/workflows/ci.yml'
+
   build:
+    needs: changes
     strategy:
       fail-fast: false
       matrix:
         os:
           - {
-              name: ubuntu-latest,
+              name: ubuntu-22.04,
               binary_name: shiki-server,
-              output_name: shiki-server-linux-amd64,
+              output_name: shiki-server-linux-x64,
             }
           - {
-              name: macos-latest,
+              name: macos-12,
               binary_name: shiki-server,
-              output_name: shiki-server-macos-amd64,
+              output_name: shiki-server-macos-x64,
             }
           - {
-              name: windows-latest,
+              name: windows-2022,
               binary_name: shiki-server.exe,
-              output_name: shiki-server-windows-amd64,
+              output_name: shiki-server-windows-x64.exe,
             }
 
     name: build-${{ matrix.os.name }}
     runs-on: ${{ matrix.os.name }}
+    if: needs.changes.outputs.build == 'true'
 
     steps:
       - name: Checkout
@@ -57,13 +92,6 @@ jobs:
         uses: turtlebrowser/get-conan@main
         with:
           version: 1.60.0
-
-      - name: Set up Clang
-        if: runner.os == 'Windows'
-        uses: egor-tensin/setup-clang@v1
-        with:
-          version: latest
-          platform: x64
 
       - name: Install OpenSSL
         if: runner.os == 'Windows'
@@ -129,47 +157,60 @@ jobs:
       #     cargo pants
 
       - name: Build
-        run: cargo build --verbose --release
+        run: cargo build --locked --release --verbose
 
-      - name: Upload binaries
+      - name: Move binary
+        run: mv ./target/release/${{ matrix.os.binary_name }} ./target/release/${{ matrix.os.output_name }}
+        shell: bash
+
+      - name: Upload binary
         uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.os.output_name }}
-          path: ./target/release/${{ matrix.os.binary_name }}
+          path: ./target/release/${{ matrix.os.output_name }}
+          if-no-files-found: error
 
   release:
     needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - { name: ubuntu-latest, binary_name: shiki-server-linux-amd64 }
-          - { name: macos-latest, binary_name: shiki-server-macos-amd64 }
-          - { name: windows-latest, binary_name: shiki-server-windows-amd64 }
-
-    name: release-${{ matrix.os.name }}
-    runs-on: ${{ matrix.os.name }}
+    runs-on: ubuntu-22.04
     if: github.event_name == 'push'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
+      - name: Get Latest Tag
+        id: latest-tag
+        run: |
+          if [[ "${{ github.ref }}" == 'refs/heads/dev' ]]; then
+            latest_tag=$(git tag -l | grep "\-dev" | sort -V | tail -n 1 || true)
+          else
+            latest_tag=$(git tag -l | grep -v "\-dev" | sort -V | tail -n 1 || true)
+          fi
+
+          if [[ -z $latest_tag ]]; then
+            latest_tag=""
+          fi
+
+          echo "::set-output name=tag::$latest_tag"
+        shell: bash
+
       - name: Get Next Version
         id: semver
         uses: ietf-tools/semver-action@v1
         with:
           token: ${{ github.token }}
-          branch: dev
+          branch: ${{ env.BRANCH_NAME }}
+          fromTag: ${{ steps.latest-tag.outputs.tag }}
 
       - name: Create Draft Release
         uses: ncipollo/release-action@v1.12.0
         with:
-          prerelease: true
+          prerelease: ${{ env.PRERELEASE }}
           draft: false
           commit: ${{ github.sha }}
-          tag: ${{ steps.semver.outputs.next }}-dev
-          name: ${{ steps.semver.outputs.next }}-dev
+          tag: ${{ steps.semver.outputs.next }}${{ env.TAG_SUFFIX }}
+          name: ${{ steps.semver.outputs.next }}${{ env.TAG_SUFFIX }}
           body: "*pending*"
           token: ${{ github.token }}
 
@@ -178,31 +219,41 @@ jobs:
         uses: requarks/changelog-action@v1
         with:
           token: ${{ github.token }}
-          tag: ${{ steps.semver.outputs.next }}-dev
+          fromTag: ${{ steps.semver.outputs.next }}${{ env.TAG_SUFFIX }}
+          toTag: ${{ steps.semver.outputs.current }}${{ env.TAG_SUFFIX }}
           writeToFile: false
 
       - name: Create Release
         uses: ncipollo/release-action@v1.12.0
         with:
-          prerelease: true
+          prerelease: ${{ env.PRERELEASE }}
           allowUpdates: true
           draft: false
           makeLatest: true
           commit: ${{ github.sha }}
-          tag: ${{ steps.semver.outputs.next }}-dev
-          name: ${{ steps.semver.outputs.next }}-dev
+          tag: ${{ steps.semver.outputs.next }}${{ env.TAG_SUFFIX }}
+          name: ${{ steps.semver.outputs.next }}${{ env.TAG_SUFFIX }}
           body: ${{ steps.changelog.outputs.changes }}
           token: ${{ github.token }}
 
-      - name: Download binaries
+    outputs:
+      next: ${{ steps.semver.outputs.next }}
+
+  upload:
+    needs: release
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Download all artifacts
         uses: actions/download-artifact@v3
         with:
-          name: ${{ matrix.os.binary_name }}
+          path: .
 
-      - name: Upload binaries to release
+      - name: Upload artifacts to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ github.token }}
-          file: ${{ matrix.os.binary_name }}
-          asset_name: ${{ matrix.os.binary_name }}-${{ matrix.os.name }}
-          tag: ${{ steps.semver.outputs.next }}-dev
+          file_glob: true
+          file: "**/*"
+          tag: ${{ needs.release.outputs.next }}${{ env.TAG_SUFFIX }}
