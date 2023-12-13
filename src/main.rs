@@ -1,9 +1,8 @@
 use crate::ws::server::ShikiServer;
 use actix::*;
 use actix_cors::Cors;
-
 use actix_session::{
-	storage::{RedisActorSessionStore, SessionStore},
+	storage::{RedisSessionStore, SessionStore},
 	SessionMiddleware,
 };
 use actix_web::{
@@ -68,14 +67,19 @@ async fn main() -> std::io::Result<()> {
 	.unwrap();
 
 	let redis_url = env::var("REDIS_URL").expect("REDIS_URL must be set");
-	let store = RedisActorSessionStore::new(redis_url.clone());
+	let store = RedisSessionStore::new(redis_url.clone())
+		.await
+		.expect("Invalid Redis URL");
 
 	store
 		.load(&session_key.clone().try_into().unwrap())
 		.await
 		.expect("Failed to connect to Redis");
 
-	routes::setup_indexes(&db).await;
+	log::info!("Connected to Redis");
+	routes::setup_indexes(&db)
+		.await
+		.expect("Failed to setup indexes. Is the database running?");
 
 	let app_state = Arc::new(AtomicUsize::new(0));
 	let snowflake_gen = Arc::new(Mutex::new(SnowflakeIdGenerator::with_epoch(
@@ -127,7 +131,7 @@ async fn main() -> std::io::Result<()> {
 			}))
 			.wrap(
 				SessionMiddleware::builder(
-					RedisActorSessionStore::new(redis_url.clone()),
+					store.clone(),
 					Key::from(session_key.as_bytes()),
 				)
 				.build(),
@@ -206,8 +210,8 @@ async fn process_packet(
 	// 			_packets.iter().map(|p| p.len()).sum::<usize>()
 	// 		);
 
-	// 		// TODO: Do something with the audio packets if we wanted to. They are decoded and resampled here.
-	// 		// let server = webrtc_server.clone();
+	// 		// TODO: Do something with the audio packets if we wanted to. They are
+	// decoded and resampled here. 		// let server = webrtc_server.clone();
 
 	// 		// Box::pin(async move {
 	// 		// 	let u8_slice = unsafe {

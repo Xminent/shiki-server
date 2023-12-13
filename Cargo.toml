@@ -42,7 +42,10 @@ proc-macro2 = "1.0"
 futures = "0.3.29"
 webrtc-unreliable = "0.5.3"
 mime = "0.3.17"
-actix-session = { version = "0.8.0", features = ["redis-actor-session"] }
+actix-session = { version = "0.8.0", features = [
+    "redis-actor-session",
+    "redis-rs-tls-session"
+] }
 
 [build-dependencies]
 bindgen = "0.68.1"

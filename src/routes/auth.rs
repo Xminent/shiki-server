@@ -139,7 +139,7 @@ async fn get_user(session: Session) -> HttpResponse {
 	}
 }
 
-pub async fn setup_indexes(client: &Client) {
+pub async fn setup_indexes(client: &Client) -> anyhow::Result<()> {
 	let email_index_model = IndexModel::builder()
 		.keys(doc! {"email": 1})
 		.options(IndexOptions::builder().unique(true).build())
@@ -151,11 +151,16 @@ pub async fn setup_indexes(client: &Client) {
 		.create_index(email_index_model, None)
 		.await
 	{
-		Ok(_) => {}
-		Err(err) => {
-			log::error!("setup_indexes: {}", err);
-		}
+		Ok(_) => (),
+		Err(err) => match *err.kind {
+			ErrorKind::ServerSelection { .. } => {
+				return Err(anyhow::anyhow!("Not connected"));
+			}
+			_ => (),
+		},
 	}
+
+	Ok(())
 }
 
 pub fn routes(cfg: &mut web::ServiceConfig) {

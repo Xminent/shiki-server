@@ -12,8 +12,8 @@ pub const CHANNEL_COLL_NAME: &str = "channels";
 pub const MESSAGE_COLL_NAME: &str = "messages";
 pub const USER_COLL_NAME: &str = "users";
 
-pub async fn setup_indexes(client: &Client) {
-	auth::setup_indexes(client).await;
+pub async fn setup_indexes(client: &Client) -> anyhow::Result<()> {
+	auth::setup_indexes(client).await
 }
 
 pub fn routes(client: &Client, cfg: &mut web::ServiceConfig) {
