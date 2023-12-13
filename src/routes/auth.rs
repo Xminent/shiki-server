@@ -152,12 +152,11 @@ pub async fn setup_indexes(client: &Client) -> anyhow::Result<()> {
 		.await
 	{
 		Ok(_) => (),
-		Err(err) => match *err.kind {
-			ErrorKind::ServerSelection { .. } => {
+		Err(err) => {
+			if let ErrorKind::ServerSelection { .. } = *err.kind {
 				return Err(anyhow::anyhow!("Not connected"));
 			}
-			_ => (),
-		},
+		}
 	}
 
 	Ok(())
