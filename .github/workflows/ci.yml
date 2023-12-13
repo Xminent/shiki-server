@@ -71,12 +71,16 @@ jobs:
         id: vcpkg
         with:
           pkgs: openssl
-          triplet: x64-windows-static-md
+          triplet: x64-windows-static
           cache-key: ${{ runner.os }}-vcpkg
           token: ${{ github.token }}
 
-      - run: echo "VCPKG_ROOT=${{ github.workspace }}\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Add VCPKG_ROOT and OPENSSL env vars
         if: runner.os == 'Windows'
+        run: |
+          echo "OPENSSL_NO_VENDOR=1" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "OPENSSL_DIR=${{ github.workspace }}\vcpkg\installed\x64-windows-static" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "VCPKG_ROOT=${{ github.workspace }}\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1
