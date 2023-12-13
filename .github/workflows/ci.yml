@@ -108,7 +108,12 @@ jobs:
         uses: cargo-bins/cargo-binstall@main
 
       - name: Install cargo check tools
-        run: cargo binstall --no-confirm --no-symlinks cargo-deny cargo-outdated cargo-udeps cargo-audit cargo-pants
+        run: |
+          which cargo-deny || cargo binstall cargo-deny
+          which cargo-outdated || cargo binstall cargo-outdated
+          which cargo-udeps || cargo binstall cargo-udeps
+          which cargo-audit || cargo binstall cargo-audit
+          which cargo-pants || cargo binstall cargo-pants
 
       # - name: Check
       #   run: |
