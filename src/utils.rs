@@ -24,7 +24,7 @@ pub async fn validate_token(
 		.await
 	{
 		Ok(Some(user)) => Ok(Some(user)),
-		Ok(None) => Err(anyhow::anyhow!("Invalid token")),
+		Ok(None) => Ok(None),
 		Err(e) => {
 			log::error!("Failed to validate token: {}", e);
 
