@@ -1,4 +1,4 @@
-use crate::utils::validate_token;
+use crate::{redis::RedisFetcher, utils::validate_token};
 use actix_web::{
 	dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
 	error::ErrorInternalServerError,
@@ -6,18 +6,17 @@ use actix_web::{
 };
 use actix_web::{error::ErrorUnauthorized, Error};
 use futures_util::future::LocalBoxFuture;
-use mongodb::Client;
 use std::{
 	future::{ready, Ready},
 	rc::Rc,
 };
 
 pub struct Auth {
-	client: Client,
+	client: RedisFetcher,
 }
 
 impl Auth {
-	pub fn new(client: Client) -> Self {
+	pub fn new(client: RedisFetcher) -> Self {
 		Auth { client }
 	}
 }
@@ -44,7 +43,7 @@ where
 }
 
 pub struct AuthMiddleWare<S> {
-	client: Client,
+	client: RedisFetcher,
 	service: Rc<S>,
 }
 

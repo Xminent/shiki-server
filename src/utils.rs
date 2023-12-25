@@ -1,6 +1,6 @@
 use crate::{
 	models::User,
-	routes::{DB_NAME, USER_COLL_NAME},
+	redis::{FetchUserId, RedisFetcher},
 };
 use argon2::{
 	password_hash::{
@@ -9,40 +9,16 @@ use argon2::{
 	},
 	Argon2,
 };
-use futures::TryStreamExt;
-use mongodb::{bson::doc, Client};
 
 pub async fn validate_token(
-	client: Client, token: String,
+	fetcher: RedisFetcher, token: String,
 ) -> anyhow::Result<Option<User>> {
 	uuid::Uuid::parse_str(&token)?;
 
-	match client
-		.database(DB_NAME)
-		.collection::<User>(USER_COLL_NAME)
-		.find_one(doc! {"token": &token}, None)
-		.await
-	{
-		Ok(Some(user)) => Ok(Some(user)),
-		Ok(None) => Ok(None),
-		Err(e) => {
-			log::error!("Failed to validate token: {}", e);
-
-			Err(e.into())
-		}
-	}
-}
-
-pub async fn get_all_users(client: Client) -> Vec<User> {
-	client
-		.database(DB_NAME)
-		.collection::<User>(USER_COLL_NAME)
-		.find(None, None)
-		.await
-		.unwrap()
-		.try_collect()
-		.await
-		.unwrap()
+	fetcher.fetch_user(FetchUserId::Token(token)).await.map_err(|e| {
+		log::error!("Failed to validate token: {}", e);
+		e
+	})
 }
 
 pub async fn hash(password: &[u8]) -> String {

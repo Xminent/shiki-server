@@ -4,6 +4,7 @@ mod gateway;
 mod middleware;
 mod rtc;
 
+use crate::redis::RedisFetcher;
 use actix_web::web;
 use mongodb::Client;
 
@@ -16,7 +17,7 @@ pub async fn setup_indexes(client: &Client) -> anyhow::Result<()> {
 	auth::setup_indexes(client).await
 }
 
-pub fn routes(client: &Client, cfg: &mut web::ServiceConfig) {
+pub fn routes(client: &RedisFetcher, cfg: &mut web::ServiceConfig) {
 	cfg.configure(|cfg| {
 		api::routes(client, cfg);
 	});

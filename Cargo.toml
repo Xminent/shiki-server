@@ -46,6 +46,8 @@ actix-session = { version = "0.8.0", features = [
     "redis-actor-session",
     "redis-rs-tls-session"
 ] }
+deadpool-redis = "0.14.0"
+redis-derive = "0.1.7"
 
 [build-dependencies]
 bindgen = "0.68.1"

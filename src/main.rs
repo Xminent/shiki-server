@@ -1,4 +1,4 @@
-use crate::ws::server::ShikiServer;
+use crate::{redis::RedisFetcher, ws::server::ShikiServer};
 use actix::*;
 use actix_cors::Cors;
 use actix_session::{
@@ -33,6 +33,7 @@ mod errors;
 mod models;
 mod opus;
 mod opusfile;
+mod redis;
 mod routes;
 mod rtc;
 mod speexdsp;
@@ -67,6 +68,12 @@ async fn main() -> std::io::Result<()> {
 	.unwrap();
 
 	let redis_url = env::var("REDIS_URL").expect("REDIS_URL must be set");
+	let cfg = deadpool_redis::Config::from_url(redis_url.clone());
+	let redis_pool = cfg
+		.create_pool(Some(deadpool_redis::Runtime::Tokio1))
+		.expect("Cannot create deadpool redis.");
+	let redis_fetcher = RedisFetcher::new(db.clone(), redis_pool);
+
 	let store = RedisSessionStore::new(redis_url.clone())
 		.await
 		.expect("Invalid Redis URL");
@@ -87,7 +94,8 @@ async fn main() -> std::io::Result<()> {
 		1,
 		UNIX_EPOCH + Duration::from_millis(1672531200),
 	)));
-	let server = ShikiServer::new(db.clone(), app_state.clone()).start();
+	let server =
+		ShikiServer::new(redis_fetcher.clone(), app_state.clone()).start();
 	let listen_socket = "0.0.0.0:8081".parse::<SocketAddr>().unwrap();
 	let public_addr = env::var("RTC_PUBLIC_ADDR")
 		.expect("RTC_PUBLIC_ADDR must be set")
@@ -119,6 +127,7 @@ async fn main() -> std::io::Result<()> {
 			.app_data(web::Data::new(server.clone()))
 			.app_data(session_endpoint.clone())
 			.app_data(web::Data::new(db.clone()))
+			.app_data(web::Data::new(redis_fetcher.clone()))
 			.app_data(web::Data::from(snowflake_gen.clone()))
 			.app_data(web::JsonConfig::default().error_handler(|err, _req| {
 				error::InternalError::from_response(
@@ -139,7 +148,7 @@ async fn main() -> std::io::Result<()> {
 			.wrap(Logger::default())
 			.wrap(cors)
 			.configure(|cfg| {
-				routes::routes(&db, cfg);
+				routes::routes(&redis_fetcher, cfg);
 			})
 	})
 	.workers(2)

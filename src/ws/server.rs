@@ -1,14 +1,13 @@
 use super::events::{self, Event};
 use crate::{
 	models,
-	routes::{CHANNEL_COLL_NAME, DB_NAME},
+	redis::RedisFetcher,
 	utils::{self},
 	ws::events::Ready,
 };
 use actix::prelude::*;
 use chrono::Utc;
-use futures_util::TryStreamExt;
-use mongodb::{bson::doc, Client};
+use mongodb::bson::doc;
 use rand::{self, rngs::ThreadRng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -54,6 +53,17 @@ pub struct Channel {
 	/// IDs of sessions in the channel
 	#[serde(skip_serializing, skip_deserializing)]
 	pub sessions: HashSet<usize>,
+}
+
+impl From<models::Channel> for Channel {
+	fn from(channel: models::Channel) -> Self {
+		Self {
+			id: channel.id,
+			guild_id: None,
+			name: channel.name,
+			sessions: HashSet::new(),
+		}
+	}
 }
 
 /// Create new Guild
@@ -132,7 +142,7 @@ pub struct Join {
 #[derive(Debug)]
 pub struct ShikiServer {
 	/// MongoDB client
-	client: Client,
+	client: RedisFetcher,
 	/// The actual connected clients to the gateway.
 	sessions: HashMap<usize, Recipient<Event>>,
 	/// Chat channels. In this case they're individual channels where messages are propagated to users in the same channel. This could be a channel, guild, etc.
@@ -144,7 +154,7 @@ pub struct ShikiServer {
 }
 
 impl ShikiServer {
-	pub fn new(client: Client, visitor_count: Arc<AtomicUsize>) -> Self {
+	pub fn new(client: RedisFetcher, visitor_count: Arc<AtomicUsize>) -> Self {
 		Self {
 			client,
 			sessions: HashMap::new(),
@@ -199,28 +209,19 @@ impl Actor for ShikiServer {
 		let client_clone = self.client.clone();
 
 		async move {
-			let cursor = client_clone
-				.database(DB_NAME)
-				.collection::<Channel>(CHANNEL_COLL_NAME)
-				.find(None, None)
-				.await;
+			let channels = client_clone.fetch_channels(None).await;
 
-			if let Err(e) = cursor {
+			if let Err(e) = channels {
 				log::error!("Failed to load channels: {}", e);
 				return Err(e);
 			}
 
-			let cursor = cursor.unwrap();
+			let channels = channels.unwrap();
 
-			let channels: Result<HashMap<i64, Channel>, _> =
-				cursor.try_collect::<Vec<Channel>>().await.map(|channels| {
-					channels
-						.into_iter()
-						.map(|channel| (channel.id, channel))
-						.collect()
-				});
+			let channels: HashMap<i64, Channel> =
+				channels.into_iter().map(|c| (c.id, c.into())).collect();
 
-			channels
+			Ok(channels)
 		}
 		.into_actor(self)
 		.then(move |res, act, ctx| {
@@ -349,8 +350,10 @@ impl Handler<Identify> for ShikiServer {
 				user.username
 			);
 
-			let users = utils::get_all_users(client_clone)
+			let users = client_clone
+				.fetch_users(None)
 				.await
+				.unwrap_or(Vec::new())
 				.into_iter()
 				.map(|u| User {
 					username: u.username,

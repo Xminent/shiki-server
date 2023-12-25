@@ -1,10 +1,22 @@
 use crate::ws::server::CreateMessage;
 use actix_web::{FromRequest, HttpMessage};
 use chrono::Utc;
+use deadpool_redis::redis;
+use redis_derive::{FromRedisValue, ToRedisArgs};
 use serde::{Deserialize, Serialize};
 use std::future::ready;
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(
+	Clone,
+	Debug,
+	PartialEq,
+	Eq,
+	Deserialize,
+	Serialize,
+	Default,
+	ToRedisArgs,
+	FromRedisValue,
+)]
 pub struct Channel {
 	/// The id of the channel
 	pub id: i64,
@@ -32,7 +44,17 @@ impl Channel {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(
+	Clone,
+	Debug,
+	PartialEq,
+	Eq,
+	Deserialize,
+	Serialize,
+	Default,
+	ToRedisArgs,
+	FromRedisValue,
+)]
 pub struct Message {
 	/// The id of the message
 	pub id: i64,
@@ -66,7 +88,17 @@ impl From<CreateMessage> for Message {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[derive(
+	Clone,
+	Debug,
+	PartialEq,
+	Eq,
+	Deserialize,
+	Serialize,
+	Default,
+	ToRedisArgs,
+	FromRedisValue,
+)]
 pub struct User {
 	pub id: i64,
 	pub email: String,

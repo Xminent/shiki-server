@@ -1,7 +1,8 @@
 use super::middleware::Auth;
 use crate::{
 	models::{Channel, Message, User},
-	routes::{CHANNEL_COLL_NAME, DB_NAME, MESSAGE_COLL_NAME, USER_COLL_NAME},
+	redis::{ModifyUser, RedisFetcher},
+	routes::{CHANNEL_COLL_NAME, DB_NAME, MESSAGE_COLL_NAME},
 	ws::server::{self, CreateMessage, Join, ListChannels, ShikiServer},
 };
 use actix::Addr;
@@ -138,7 +139,7 @@ pub struct GetMessage {
 #[get("/channels/{channel_id}/messages")]
 async fn get_messages(
 	channel_id: web::Path<i64>, client: web::Data<Client>,
-	data: web::Query<GetMessages>,
+	data: web::Query<GetMessages>, fetcher: web::Data<RedisFetcher>,
 ) -> HttpResponse {
 	if data.limit < 1 || data.limit > 100 {
 		return HttpResponse::BadRequest()
@@ -197,39 +198,35 @@ async fn get_messages(
 	};
 
 	// Make a set of all of the user IDs mentioned in the messages.
-	let user_ids: HashSet<i64> =
-		messages.iter().map(|msg| msg.author_id).collect();
+	let user_ids = messages
+		.iter()
+		.map(|msg| msg.author_id)
+		.collect::<HashSet<i64>>()
+		.into_iter()
+		.collect::<Vec<i64>>();
 
 	log::debug!("User IDs: {:?}", user_ids);
 
 	// Fetch the users
+	let users = fetcher.fetch_users(Some(&user_ids)).await;
+	let users: HashMap<i64, server::User> = match users {
+		Ok(users) => {
+			if users.len() < user_ids.len() {
+				log::error!(
+					"Missing {:?} users when fetching messages",
+					user_ids.len() - users.len()
+				);
 
-	let cursor = client
-		.database(DB_NAME)
-		.collection::<User>(USER_COLL_NAME)
-		.find(
-			doc! {
-				"id": {
-					"$in": user_ids.iter().copied().collect::<Vec<i64>>()
-				}
-			},
-			None,
-		)
-		.await;
+				return HttpResponse::InternalServerError()
+					.body("Something went wrong");
+			}
 
-	let users = match cursor {
-		Ok(cursor) => cursor.try_collect::<Vec<User>>().await,
+			users.into_iter().map(|user| (user.id, user.into())).collect()
+		}
 		Err(_) => {
 			return HttpResponse::InternalServerError()
 				.body("Something went wrong");
 		}
-	};
-
-	let users: HashMap<i64, server::User> = match users {
-		Ok(users) => {
-			users.into_iter().map(|user| (user.id, user.into())).collect()
-		}
-		Err(_) => HashMap::new(),
 	};
 
 	let messages: Vec<GetMessage> = messages
@@ -288,43 +285,18 @@ async fn create_message(
 	}
 }
 
-#[derive(Deserialize, Validate)]
-struct ModifyUser {
-	/// User's username
-	#[validate(length(min = 3, max = 20))]
-	pub username: Option<String>,
-	/// User's avatar
-	pub avatar: Option<String>,
-}
-
 /// Modify the requester's user account settings. Returns a user object on success.
 // TODO: Fire a User Update Gateway event.
 #[patch("/users/@me")]
 async fn modify_user(
-	client: web::Data<Client>, data: web::Json<ModifyUser>,
-	_srv: web::Data<Addr<ShikiServer>>, mut user: User,
+	data: web::Json<ModifyUser>, fetcher: web::Data<RedisFetcher>,
+	mut user: User,
 ) -> HttpResponse {
 	if let Err(err) = data.validate() {
 		return HttpResponse::BadRequest().json(err);
 	}
 
-	let data = data.into_inner();
-
-	if let Some(username) = data.username {
-		user.username = username;
-	}
-
-	if let Some(avatar) = data.avatar {
-		user.avatar = Some(avatar);
-	}
-
-	let res = client
-		.database(DB_NAME)
-		.collection::<User>(USER_COLL_NAME)
-		.replace_one(doc! {"email": &user.email}, user.clone(), None)
-		.await;
-
-	match res {
+	match fetcher.modify_user(&mut user, data.into_inner()).await {
 		Ok(_) => HttpResponse::Ok().json(server::User {
 			id: user.id,
 			username: user.username,
@@ -333,13 +305,12 @@ async fn modify_user(
 		}),
 		Err(err) => {
 			log::error!("{:?}", err);
-
 			HttpResponse::InternalServerError().body("Something went wrong")
 		}
 	}
 }
 
-pub fn routes(client: &Client, cfg: &mut web::ServiceConfig) {
+pub fn routes(client: &RedisFetcher, cfg: &mut web::ServiceConfig) {
 	cfg.service(
 		web::scope("/api")
 			.service(get_count)
