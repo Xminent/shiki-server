@@ -2,7 +2,7 @@ use super::middleware::Auth;
 use crate::{
 	models::{Channel, Message, User},
 	redis::{ModifyUser, RedisFetcher},
-	routes::{CHANNEL_COLL_NAME, DB_NAME, MESSAGE_COLL_NAME},
+	routes::{DB_NAME, MESSAGE_COLL_NAME},
 	ws::server::{self, CreateMessage, Join, ListChannels, ShikiServer},
 };
 use actix::Addr;
@@ -45,7 +45,7 @@ struct CreateChannel {
 /// Creates a new channel.
 #[post("/channels")]
 async fn create_channel(
-	client: web::Data<Client>, data: web::Json<CreateChannel>,
+	data: web::Json<CreateChannel>, fetcher: web::Data<RedisFetcher>,
 	snowflake_gen: web::Data<Mutex<SnowflakeIdGenerator>>,
 	srv: web::Data<Addr<ShikiServer>>, user: User,
 ) -> HttpResponse {
@@ -56,12 +56,7 @@ async fn create_channel(
 	let data = data.into_inner();
 	let id = snowflake_gen.lock().await.real_time_generate();
 	let channel = Channel::new(id, &data.name, None, user.id);
-
-	let res = client
-		.database(DB_NAME)
-		.collection::<Channel>(CHANNEL_COLL_NAME)
-		.insert_one(channel, None)
-		.await;
+	let res = fetcher.insert_channel(channel).await;
 
 	if res.is_err() {
 		return HttpResponse::InternalServerError()
@@ -246,8 +241,8 @@ async fn get_messages(
 /// Creates a new message
 #[post("/channels/{channel_id}/messages")]
 async fn create_message(
-	channel_id: web::Path<i64>, client: web::Data<Client>,
-	data: web::Json<CreateMessage>,
+	channel_id: web::Path<i64>, data: web::Json<CreateMessage>,
+	fetcher: web::Data<RedisFetcher>,
 	snowflake_gen: web::Data<Mutex<SnowflakeIdGenerator>>,
 	srv: web::Data<Addr<ShikiServer>>, user: User,
 ) -> HttpResponse {
@@ -262,11 +257,7 @@ async fn create_message(
 		avatar: user.avatar,
 	};
 
-	let res = client
-		.database(DB_NAME)
-		.collection::<Message>(MESSAGE_COLL_NAME)
-		.insert_one(Message::from(data.clone()), None)
-		.await;
+	let res = fetcher.insert_message(Message::from(data.clone())).await;
 
 	if res.is_err() {
 		return HttpResponse::InternalServerError()
@@ -277,9 +268,8 @@ async fn create_message(
 	match srv.send(data).await {
 		Ok(Some(msg)) => HttpResponse::Ok().json(msg),
 		Ok(None) => HttpResponse::BadRequest().body("Channel does not exist!"),
-		Err(err) => {
-			log::error!("Failed to send message: {:?}", err);
-
+		Err(e) => {
+			log::error!("Failed to send message: {:?}", e);
 			HttpResponse::InternalServerError().body("Something went wrong")
 		}
 	}

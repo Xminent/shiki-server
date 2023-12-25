@@ -1,8 +1,9 @@
-// Methods which abstract the fetching of our data from redis, all data should be fetched first on redist, and fallback to the database.
+#![allow(dead_code)]
 
+// Methods which abstract the fetching of our data from redis, all data should be fetched first on redis, and fallback to the database.
 use crate::{
 	models,
-	routes::{CHANNEL_COLL_NAME, DB_NAME, USER_COLL_NAME},
+	routes::{CHANNEL_COLL_NAME, DB_NAME, MESSAGE_COLL_NAME, USER_COLL_NAME},
 };
 use anyhow::Result;
 use deadpool_redis::{
@@ -279,6 +280,36 @@ impl RedisFetcher {
 		}
 
 		Ok(users)
+	}
+
+	pub async fn insert_channel(&self, channel: models::Channel) -> Result<()> {
+		let mut conn = self.create_connection().await?;
+
+		set_value(&mut conn, &format!("channel_{}", channel.id), &channel)
+			.await?;
+
+		self.client
+			.database(DB_NAME)
+			.collection::<models::Channel>(CHANNEL_COLL_NAME)
+			.insert_one(channel, None)
+			.await
+			.map(|_| ())
+			.map_err(|e| anyhow::anyhow!(e))
+	}
+
+	pub async fn insert_message(&self, message: models::Message) -> Result<()> {
+		let mut conn = self.create_connection().await?;
+
+		set_value(&mut conn, &format!("message_{}", message.id), &message)
+			.await?;
+
+		self.client
+			.database(DB_NAME)
+			.collection::<models::Message>(MESSAGE_COLL_NAME)
+			.insert_one(message, None)
+			.await
+			.map(|_| ())
+			.map_err(|e| anyhow::anyhow!(e))
 	}
 
 	pub async fn modify_user(
