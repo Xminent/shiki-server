@@ -38,7 +38,7 @@ async fn get_channels_list(
 
 #[derive(Deserialize, Validate, Serialize)]
 struct CreateChannel {
-	#[validate(length(min = 1))]
+	#[validate(length(min = 1), non_control_character)]
 	pub name: String,
 }
 

@@ -376,7 +376,7 @@ impl RedisFetcher {
 #[derive(Deserialize, Validate)]
 pub struct ModifyUser {
 	/// User's username
-	#[validate(length(min = 3, max = 20))]
+	#[validate(length(min = 2, max = 32), non_control_character)]
 	pub username: Option<String>,
 	/// User's avatar
 	pub avatar: Option<String>,

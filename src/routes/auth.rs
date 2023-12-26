@@ -20,7 +20,7 @@ use validator::Validate;
 pub struct UserInsert {
 	#[validate(email)]
 	pub email: String,
-	#[validate(length(min = 3))]
+	#[validate(length(min = 2, max = 32), non_control_character)]
 	pub username: String,
 	#[validate(length(min = 8))]
 	pub password: String,
