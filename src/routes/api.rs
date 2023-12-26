@@ -177,7 +177,7 @@ async fn get_messages(
 		)
 		.await;
 
-	let messages = match cursor {
+	let mut messages = match cursor {
 		Ok(cursor) => match cursor.try_collect::<Vec<Message>>().await {
 			Ok(res) => res,
 			Err(_) => {
@@ -206,16 +206,6 @@ async fn get_messages(
 	let users = fetcher.fetch_users(Some(&user_ids)).await;
 	let users: HashMap<i64, server::User> = match users {
 		Ok(users) => {
-			if users.len() < user_ids.len() {
-				log::error!(
-					"Missing {:?} users when fetching messages",
-					user_ids.len() - users.len()
-				);
-
-				return HttpResponse::InternalServerError()
-					.body("Something went wrong");
-			}
-
 			users.into_iter().map(|user| (user.id, user.into())).collect()
 		}
 		Err(_) => {
@@ -224,14 +214,45 @@ async fn get_messages(
 		}
 	};
 
+	if users.len() < user_ids.len() {
+		log::warn!(
+			"Missing {:?} users when fetching messages",
+			user_ids.len() - users.len()
+		);
+
+		// Redact the identity of this missing user from all messages.
+		let missing = user_ids
+			.into_iter()
+			.filter(|id| !users.contains_key(id))
+			.collect::<Vec<i64>>();
+
+		for id in missing {
+			for msg in messages.iter_mut() {
+				if msg.author_id == id {
+					msg.author_id = 0;
+				}
+			}
+		}
+	}
+
 	let messages: Vec<GetMessage> = messages
 		.into_iter()
-		.map(|msg| GetMessage {
-			id: msg.id,
-			channel_id: msg.channel_id,
-			content: msg.content,
-			created_at: msg.created_at,
-			author: users.get(&msg.author_id).cloned().unwrap_or_default(),
+		.map(|msg| {
+			let author = if msg.author_id == 0 {
+				let mut ret = server::User::default();
+				ret.username = "Deleted User".to_string();
+				ret
+			} else {
+				users.get(&msg.author_id).cloned().unwrap_or_default()
+			};
+
+			GetMessage {
+				id: msg.id,
+				channel_id: msg.channel_id,
+				content: msg.content,
+				created_at: msg.created_at,
+				author,
+			}
 		})
 		.collect();
 
