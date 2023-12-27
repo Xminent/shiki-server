@@ -239,9 +239,10 @@ async fn get_messages(
 		.into_iter()
 		.map(|msg| {
 			let author = if msg.author_id == 0 {
-				let mut ret = server::User::default();
-				ret.username = "Deleted User".to_string();
-				ret
+				server::User {
+					username: "Deleted User".to_string(),
+					..Default::default()
+				}
 			} else {
 				users.get(&msg.author_id).cloned().unwrap_or_default()
 			};
