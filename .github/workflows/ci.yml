@@ -142,11 +142,11 @@ jobs:
 
       - name: Install cargo check tools
         run: |
-          which cargo-deny || cargo binstall cargo-deny
-          which cargo-outdated || cargo binstall cargo-outdated
-          which cargo-udeps || cargo binstall cargo-udeps
-          which cargo-audit || cargo binstall cargo-audit
-          which cargo-pants || cargo binstall cargo-pants
+          which cargo-deny || cargo binstall --no-confirm cargo-deny
+          which cargo-outdated || cargo binstall --no-confirm cargo-outdated
+          which cargo-udeps || cargo binstall --no-confirm cargo-udeps
+          which cargo-audit || cargo binstall --no-confirm cargo-audit
+          which cargo-pants || cargo binstall --no-confirm cargo-pants
 
       # - name: Check
       #   run: |
